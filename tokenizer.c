@@ -26,6 +26,7 @@ struct tokenizer {
 	struct tokenizer_getc_buf getc_buf;
 	struct tokenizer_str_len_tuple ml_comment_start;
 	struct tokenizer_str_len_tuple ml_comment_end;
+	struct tokenizer_str_len_tuple sl_comment_start;
 	int in_multiline_comment;
 };
 
@@ -269,6 +270,11 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 				t->in_multiline_comment = 1;
 				continue;
 			}
+			if(check_ml_comment_marker(t, c, &t->sl_comment_start)) {
+				while((c = tokenizer_getc(t)) != '\n');
+				continue;
+			}
+
 		} else {
 			if(check_ml_comment_marker(t, c, &t->ml_comment_end))
 				t->in_multiline_comment = 0;
@@ -319,11 +325,19 @@ void tokenizer_register_multiline_comment_marker(
 	t->ml_comment_end.len = strlen(endmarker);
 }
 
+/* a marker such as // in C or # in python. means from here till \n is a comment. */
+void tokenizer_register_singleline_comment_marker(
+	struct tokenizer *t, const char* marker) {
+	t->sl_comment_start.str = marker;
+	t->sl_comment_start.len = strlen(marker);
+}
+
 int main(int argc, char** argv) {
 	struct tokenizer t;
 	struct token curr;
 	tokenizer_init(&t, stdin);
 	tokenizer_register_multiline_comment_marker(&t, "\"\"\"", "\"\"\"");
+	tokenizer_register_singleline_comment_marker(&t, "#");
 	int ret;
 	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
 		dprintf(1, "(stdin:%u,%u) ", curr.line, curr.column);
