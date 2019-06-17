@@ -2,15 +2,56 @@
 #include <stdio.h>
 #include <ctype.h>
 #include <string.h>
+#include <assert.h>
 
 #define MAX_TOK_LEN 4096
+
+struct tokenizer_str_len_tuple {
+	const char *str;
+	size_t len;
+};
+
+#define MAX_UNGETC 8
+struct tokenizer_getc_buf {
+	char buf[8]; /* MAX_UNGETC */
+	size_t cnt, buffered;
+};
 
 struct tokenizer {
 	FILE *input;
 	uint32_t line;
 	uint32_t column;
+	uint32_t buffered;
 	char buf[MAX_TOK_LEN];
+	struct tokenizer_getc_buf getc_buf;
+	struct tokenizer_str_len_tuple ml_comment_start;
+	struct tokenizer_str_len_tuple ml_comment_end;
+	int in_multiline_comment;
 };
+
+static int tokenizer_ungetc(struct tokenizer *t, int c)
+{
+	++t->getc_buf.buffered;
+	assert(t->getc_buf.buffered<sizeof(t->getc_buf.buf));
+	assert(t->getc_buf.cnt > 0);
+	--t->getc_buf.cnt;
+	assert(t->getc_buf.buf[t->getc_buf.cnt % sizeof(t->getc_buf.buf)] == c);
+	return c;
+}
+static int tokenizer_getc(struct tokenizer *t)
+{
+	int c;
+	if(t->getc_buf.buffered) {
+		t->getc_buf.buffered--;
+		c = t->getc_buf.buf[(t->getc_buf.cnt) % sizeof(t->getc_buf.buf)];
+	} else {
+		c = getc(t->input);
+		t->getc_buf.buf[t->getc_buf.cnt % sizeof(t->getc_buf.buf)] = c;
+	}
+	++t->getc_buf.cnt;
+	return c;
+}
+
 
 enum tokentype {
 	TT_IDENTIFIER,
@@ -165,7 +206,7 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out) {
 	char *s = t->buf+1;
 	int escaped = 0;
 	while((uintptr_t)s < (uintptr_t)t->buf + MAX_TOK_LEN + 2) {
-		int c = getc(t->input);
+		int c = tokenizer_getc(t);
 		if(c == EOF) {
 			out->type = TT_EOF;
 			*s = 0;
@@ -195,17 +236,46 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out) {
 	return apply_coords(t, out, s, 0);
 }
 
+static int check_ml_comment_marker(struct tokenizer *t, int c, struct tokenizer_str_len_tuple *which)
+{
+	if(!which->str) return 0;
+	size_t i = 0;
+	while(which->str[i] && c == which->str[i]) {
+		if(++i == which->len) break;
+		c = tokenizer_getc(t);
+	}
+	if(i != which->len) {
+		while(i > 0) {
+			tokenizer_ungetc(t, c);
+			c = which->str[--i];
+		}
+		return 0;
+	}
+	return 1;
+}
+
 int tokenizer_next(struct tokenizer *t, struct token* out) {
 	char *s = t->buf;
 	out->value = 0;
 	while(1) {
-		int c = getc(t->input);
+		int c = tokenizer_getc(t);
 		if(c == EOF) {
 			out->type = TT_EOF;
 			return apply_coords(t, out, s, 1);
 		}
+		/* components of multi-line comment marker might be terminals themselves */
+		if(!t->in_multiline_comment) {
+			if(check_ml_comment_marker(t, c, &t->ml_comment_start)) {
+				t->in_multiline_comment = 1;
+				continue;
+			}
+		} else {
+			if(check_ml_comment_marker(t, c, &t->ml_comment_end))
+				t->in_multiline_comment = 0;
+			continue;
+		}
 		if(is_sep(c)) {
-			ungetc(c, t->input);
+			tokenizer_ungetc(t, c);
 			break;
 		}
 
@@ -216,7 +286,7 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 		}
 	}
 	if(s == t->buf) {
-		int c = getc(t->input);
+		int c = tokenizer_getc(t);
 		s = assign_bufchar(t, s, c);
 		*s = 0;
 		//s = assign_bufchar(t, s, 0);
@@ -238,15 +308,22 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 }
 
 void tokenizer_init(struct tokenizer *t, FILE* in) {
-	t->input = in;
-	t->line = 1;
-	t->column = 0;
+	*t = (struct tokenizer){ .input = in, .line = 1 };
+}
+
+void tokenizer_register_multiline_comment_marker(
+	struct tokenizer *t, const char* startmarker, const char *endmarker) {
+	t->ml_comment_start.str = startmarker;
+	t->ml_comment_start.len = strlen(startmarker);
+	t->ml_comment_end.str = endmarker;
+	t->ml_comment_end.len = strlen(endmarker);
 }
 
 int main(int argc, char** argv) {
 	struct tokenizer t;
 	struct token curr;
 	tokenizer_init(&t, stdin);
+	tokenizer_register_multiline_comment_marker(&t, "\"\"\"", "\"\"\"");
 	int ret;
 	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
 		dprintf(1, "(stdin:%u,%u) ", curr.line, curr.column);
