@@ -16,7 +16,6 @@ struct tokenizer {
 	FILE *input;
 	uint32_t line;
 	uint32_t column;
-	uint32_t buffered;
 	char buf[MAX_TOK_LEN];
 	struct tokenizer_getc_buf getc_buf;
 	const char* ml_comment_start;
