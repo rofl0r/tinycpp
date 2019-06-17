@@ -8,7 +8,7 @@
 #define MAX_UNGETC 8
 
 struct tokenizer_getc_buf {
-	char buf[8]; /* MAX_UNGETC */
+	char buf[MAX_UNGETC];
 	size_t cnt, buffered;
 };
 
