@@ -14,8 +14,8 @@ struct tokenizer {
 
 enum tokentype {
 	TT_IDENTIFIER,
-	TT_CHAR_LIT,
-	TT_STRING_LIT,
+	TT_SQSTRING_LIT,
+	TT_DQSTRING_LIT,
 	TT_ELLIPSIS,
 	TT_HEX_INT_LIT,
 	TT_OCT_INT_LIT,
@@ -30,8 +30,8 @@ enum tokentype {
 static const char* tokentype_to_str(enum tokentype tt) {
 	switch(tt) {
 		case TT_IDENTIFIER: return "iden";
-		case TT_CHAR_LIT: return "char";
-		case TT_STRING_LIT: return "string";
+		case TT_SQSTRING_LIT: return "single-quoted string";
+		case TT_DQSTRING_LIT: return "double-quoted string";
 		case TT_ELLIPSIS: return "ellipsis";
 		case TT_HEX_INT_LIT: return "hexint";
 		case TT_OCT_INT_LIT: return "octint";
@@ -161,7 +161,7 @@ static inline char *assign_bufchar(struct tokenizer *t, char *s, int c) {
 	return s + 1;
 }
 
-static int get_string(struct tokenizer *t, struct token* out) {
+static int get_string(struct tokenizer *t, char quote_char, struct token* out) {
 	char *s = t->buf+1;
 	int escaped = 0;
 	while((uintptr_t)s < (uintptr_t)t->buf + MAX_TOK_LEN + 2) {
@@ -177,11 +177,11 @@ static int get_string(struct tokenizer *t, struct token* out) {
 			return apply_coords(t, out, s, 0);
 		}
 		if(!escaped) {
-			if(c == '"') {
+			if(c == quote_char) {
 				s = assign_bufchar(t, s, c);
 				*s = 0;
 				//s = assign_bufchar(t, s, 0);
-				out->type = TT_STRING_LIT;
+				out->type = (quote_char == '"'? TT_DQSTRING_LIT : TT_SQSTRING_LIT);
 				return apply_coords(t, out, s, 1);
 			}
 			if(c == '\\') escaped = 1;
@@ -191,46 +191,6 @@ static int get_string(struct tokenizer *t, struct token* out) {
 		s = assign_bufchar(t, s, c);
 	}
 	t->buf[MAX_TOK_LEN-1] = 0;
-	out->type = TT_OVERFLOW;
-	return apply_coords(t, out, s, 0);
-}
-
-static int get_char(struct tokenizer *t, struct token* out) {
-	char *s = t->buf+1;
-	int escaped = 0, cnt = 0;
-	while(cnt < 3 && (uintptr_t)s < (uintptr_t)t->buf + MAX_TOK_LEN + 2) {
-		int c = getc(t->input);
-		if(c == EOF) {
-			out->type = TT_EOF;
-			*s = 0;
-			return apply_coords(t, out, s, 0);
-		}
-		if(cnt == 0) {
-			if(c == '\\') escaped = 1;
-		} else if(cnt == 1) {
-			if(!escaped && c != '\'') {
-wrong:
-				s = assign_bufchar(t, s, c);
-				out->type = TT_UNKNOWN;
-				*s = 0;
-				return apply_coords(t, out, s, 0);
-			} else if(!escaped && c == '\'') {
-right:
-				out->type = TT_CHAR_LIT;
-				s = assign_bufchar(t, s, c);
-				*s = 0;
-				return apply_coords(t, out, s, 1);
-			}
-		} else if(cnt == 2) {
-			if(c != '\'') {
-				goto wrong;
-			}
-			goto right;
-		}
-		s = assign_bufchar(t, s, c);
-		cnt++;
-	}
-	*s = 0;
 	out->type = TT_OVERFLOW;
 	return apply_coords(t, out, s, 0);
 }
@@ -260,8 +220,7 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 		s = assign_bufchar(t, s, c);
 		*s = 0;
 		//s = assign_bufchar(t, s, 0);
-		if(c == '"') return get_string(t, out);
-		if(c == '\'') return get_char(t, out);
+		if(c == '"' || c == '\'') return get_string(t, c, out);
 		out->type = TT_SEP;
 		out->value = c;
 		if(c == '\n') {
