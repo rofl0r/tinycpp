@@ -22,7 +22,6 @@ struct tokenizer {
 	const char* ml_comment_start;
 	const char* ml_comment_end;
 	const char* sl_comment_start;
-	int in_multiline_comment;
 };
 
 static int tokenizer_ungetc(struct tokenizer *t, int c)
@@ -247,6 +246,20 @@ static int sequence_follows(struct tokenizer *t, int c, const char *which)
 	return 0;
 }
 
+static void ignore_until(struct tokenizer *t, const char* marker, int col_advance)
+{
+	t->column += col_advance;
+	int c;
+	do {
+		c = tokenizer_getc(t);
+		if(c == '\n') {
+			t->line++;
+			t->column = 0;
+		} else t->column++;
+	} while(!sequence_follows(t, c, marker));
+	t->column += strlen(marker)-1;
+}
+
 int tokenizer_next(struct tokenizer *t, struct token* out) {
 	char *s = t->buf;
 	out->value = 0;
@@ -257,19 +270,12 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			return apply_coords(t, out, s, 1);
 		}
 		/* components of multi-line comment marker might be terminals themselves */
-		if(!t->in_multiline_comment) {
-			if(sequence_follows(t, c, t->ml_comment_start)) {
-				t->in_multiline_comment = 1;
-				continue;
-			}
-			if(sequence_follows(t, c, t->sl_comment_start)) {
-				while((c = tokenizer_getc(t)) != '\n');
-				continue;
-			}
-
-		} else {
-			if(sequence_follows(t, c, t->ml_comment_end))
-				t->in_multiline_comment = 0;
+		if(sequence_follows(t, c, t->ml_comment_start)) {
+			ignore_until(t, t->ml_comment_end, strlen(t->ml_comment_start));
+			continue;
+		}
+		if(sequence_follows(t, c, t->sl_comment_start)) {
+			ignore_until(t, "\n", strlen(t->sl_comment_start));
 			continue;
 		}
 		if(is_sep(c)) {
