@@ -5,13 +5,8 @@
 #include <assert.h>
 
 #define MAX_TOK_LEN 4096
-
-struct tokenizer_str_len_tuple {
-	const char *str;
-	size_t len;
-};
-
 #define MAX_UNGETC 8
+
 struct tokenizer_getc_buf {
 	char buf[8]; /* MAX_UNGETC */
 	size_t cnt, buffered;
@@ -24,9 +19,9 @@ struct tokenizer {
 	uint32_t buffered;
 	char buf[MAX_TOK_LEN];
 	struct tokenizer_getc_buf getc_buf;
-	struct tokenizer_str_len_tuple ml_comment_start;
-	struct tokenizer_str_len_tuple ml_comment_end;
-	struct tokenizer_str_len_tuple sl_comment_start;
+	const char* ml_comment_start;
+	const char* ml_comment_end;
+	const char* sl_comment_start;
 	int in_multiline_comment;
 };
 
@@ -52,7 +47,6 @@ static int tokenizer_getc(struct tokenizer *t)
 	++t->getc_buf.cnt;
 	return c;
 }
-
 
 enum tokentype {
 	TT_IDENTIFIER,
@@ -237,22 +231,20 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out) {
 	return apply_coords(t, out, s, 0);
 }
 
-static int check_ml_comment_marker(struct tokenizer *t, int c, struct tokenizer_str_len_tuple *which)
+static int sequence_follows(struct tokenizer *t, int c, const char *which)
 {
-	if(!which->str) return 0;
+	if(!which || !which[0]) return 0;
 	size_t i = 0;
-	while(which->str[i] && c == which->str[i]) {
-		if(++i == which->len) break;
+	while(c == which[i]) {
+		if(!which[++i]) break;
 		c = tokenizer_getc(t);
 	}
-	if(i != which->len) {
-		while(i > 0) {
-			tokenizer_ungetc(t, c);
-			c = which->str[--i];
-		}
-		return 0;
+	if(!which[i]) return 1;
+	while(i > 0) {
+		tokenizer_ungetc(t, c);
+		c = which[--i];
 	}
-	return 1;
+	return 0;
 }
 
 int tokenizer_next(struct tokenizer *t, struct token* out) {
@@ -266,17 +258,17 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 		}
 		/* components of multi-line comment marker might be terminals themselves */
 		if(!t->in_multiline_comment) {
-			if(check_ml_comment_marker(t, c, &t->ml_comment_start)) {
+			if(sequence_follows(t, c, t->ml_comment_start)) {
 				t->in_multiline_comment = 1;
 				continue;
 			}
-			if(check_ml_comment_marker(t, c, &t->sl_comment_start)) {
+			if(sequence_follows(t, c, t->sl_comment_start)) {
 				while((c = tokenizer_getc(t)) != '\n');
 				continue;
 			}
 
 		} else {
-			if(check_ml_comment_marker(t, c, &t->ml_comment_end))
+			if(sequence_follows(t, c, t->ml_comment_end))
 				t->in_multiline_comment = 0;
 			continue;
 		}
@@ -319,17 +311,14 @@ void tokenizer_init(struct tokenizer *t, FILE* in) {
 
 void tokenizer_register_multiline_comment_marker(
 	struct tokenizer *t, const char* startmarker, const char *endmarker) {
-	t->ml_comment_start.str = startmarker;
-	t->ml_comment_start.len = strlen(startmarker);
-	t->ml_comment_end.str = endmarker;
-	t->ml_comment_end.len = strlen(endmarker);
+	t->ml_comment_start = startmarker;
+	t->ml_comment_end = endmarker;
 }
 
 /* a marker such as // in C or # in python. means from here till \n is a comment. */
 void tokenizer_register_singleline_comment_marker(
 	struct tokenizer *t, const char* marker) {
-	t->sl_comment_start.str = marker;
-	t->sl_comment_start.len = strlen(marker);
+	t->sl_comment_start = marker;
 }
 
 int main(int argc, char** argv) {
