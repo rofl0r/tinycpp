@@ -5,8 +5,9 @@ int main(int argc, char** argv) {
 	struct tokenizer t;
 	struct token curr;
 	tokenizer_init(&t, stdin);
-	tokenizer_register_multiline_comment_marker(&t, "\"\"\"", "\"\"\"");
-	tokenizer_register_singleline_comment_marker(&t, "#");
+	tokenizer_register_marker(&t, MT_MULTILINE_COMMENT_START, "\"\"\"");
+	tokenizer_register_marker(&t, MT_MULTILINE_COMMENT_END, "\"\"\"");
+	tokenizer_register_marker(&t, MT_SINGLELINE_COMMENT_START, "#");
 	int ret;
 	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
 		dprintf(1, "(stdin:%u,%u) ", curr.line, curr.column);

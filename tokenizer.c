@@ -230,12 +230,12 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			return apply_coords(t, out, s, 1);
 		}
 		/* components of multi-line comment marker might be terminals themselves */
-		if(sequence_follows(t, c, t->ml_comment_start)) {
-			ignore_until(t, t->ml_comment_end, strlen(t->ml_comment_start));
+		if(sequence_follows(t, c, t->marker[MT_MULTILINE_COMMENT_START])) {
+			ignore_until(t, t->marker[MT_MULTILINE_COMMENT_END], strlen(t->marker[MT_MULTILINE_COMMENT_START]));
 			continue;
 		}
-		if(sequence_follows(t, c, t->sl_comment_start)) {
-			ignore_until(t, "\n", strlen(t->sl_comment_start));
+		if(sequence_follows(t, c, t->marker[MT_SINGLELINE_COMMENT_START])) {
+			ignore_until(t, "\n", strlen(t->marker[MT_SINGLELINE_COMMENT_START]));
 			continue;
 		}
 		if(is_sep(c)) {
@@ -275,14 +275,8 @@ void tokenizer_init(struct tokenizer *t, FILE* in) {
 	*t = (struct tokenizer){ .input = in, .line = 1 };
 }
 
-void tokenizer_register_multiline_comment_marker(
-	struct tokenizer *t, const char* startmarker, const char *endmarker) {
-	t->ml_comment_start = startmarker;
-	t->ml_comment_end = endmarker;
+void tokenizer_register_marker(struct tokenizer *t, enum markertype mt, const char* marker)
+{
+	t->marker[mt] = marker;
 }
 
-/* a marker such as // in C or # in python. means from here till \n is a comment. */
-void tokenizer_register_singleline_comment_marker(
-	struct tokenizer *t, const char* marker) {
-	t->sl_comment_start = marker;
-}
