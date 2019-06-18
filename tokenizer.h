@@ -24,6 +24,7 @@ struct tokenizer {
 	FILE *input;
 	uint32_t line;
 	uint32_t column;
+	int flags;
 	char buf[MAX_TOK_LEN];
 	struct tokenizer_getc_buf getc_buf;
 	const char* marker[MT_MAX+1];
@@ -53,7 +54,11 @@ struct token {
 	int value;
 };
 
-void tokenizer_init(struct tokenizer *t, FILE* in);
+enum tokenizer_flags {
+	TF_PARSE_STRINGS = 1 << 0,
+};
+
+void tokenizer_init(struct tokenizer *t, FILE* in, int flags);
 void tokenizer_register_marker(struct tokenizer*, enum markertype, const char*);
 int tokenizer_next(struct tokenizer *t, struct token* out);
 void tokenizer_skip_until(struct tokenizer *t, const char *marker);

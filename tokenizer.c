@@ -259,7 +259,8 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 		s = assign_bufchar(t, s, c);
 		*s = 0;
 		//s = assign_bufchar(t, s, 0);
-		if(c == '"' || c == '\'') return get_string(t, c, out);
+		if(c == '"' || c == '\'')
+			if(t->flags & TF_PARSE_STRINGS) return get_string(t, c, out);
 		out->type = TT_SEP;
 		out->value = c;
 		if(c == '\n') {
@@ -276,8 +277,8 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 	return apply_coords(t, out, s, out->type != TT_UNKNOWN);
 }
 
-void tokenizer_init(struct tokenizer *t, FILE* in) {
-	*t = (struct tokenizer){ .input = in, .line = 1 };
+void tokenizer_init(struct tokenizer *t, FILE* in, int flags) {
+	*t = (struct tokenizer){ .input = in, .line = 1, .flags = flags };
 }
 
 void tokenizer_register_marker(struct tokenizer *t, enum markertype mt, const char* marker)
