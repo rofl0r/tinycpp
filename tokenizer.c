@@ -220,6 +220,11 @@ static void ignore_until(struct tokenizer *t, const char* marker, int col_advanc
 	t->column += strlen(marker)-1;
 }
 
+void tokenizer_skip_until(struct tokenizer *t, const char *marker)
+{
+	ignore_until(t, marker, 0);
+}
+
 int tokenizer_next(struct tokenizer *t, struct token* out) {
 	char *s = t->buf;
 	out->value = 0;

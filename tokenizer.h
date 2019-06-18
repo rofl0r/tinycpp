@@ -56,6 +56,7 @@ struct token {
 void tokenizer_init(struct tokenizer *t, FILE* in);
 void tokenizer_register_marker(struct tokenizer*, enum markertype, const char*);
 int tokenizer_next(struct tokenizer *t, struct token* out);
+void tokenizer_skip_until(struct tokenizer *t, const char *marker);
 
 #pragma RcB2 DEP "tokenizer.c"
 
