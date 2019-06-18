@@ -59,6 +59,7 @@ enum tokenizer_flags {
 };
 
 void tokenizer_init(struct tokenizer *t, FILE* in, int flags);
+void tokenizer_set_flags(struct tokenizer *t, int flags);
 void tokenizer_register_marker(struct tokenizer*, enum markertype, const char*);
 int tokenizer_next(struct tokenizer *t, struct token* out);
 void tokenizer_skip_until(struct tokenizer *t, const char *marker);

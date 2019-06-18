@@ -277,6 +277,10 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 	return apply_coords(t, out, s, out->type != TT_UNKNOWN);
 }
 
+void tokenizer_set_flags(struct tokenizer *t, int flags) {
+	t->flags = flags;
+}
+
 void tokenizer_init(struct tokenizer *t, FILE* in, int flags) {
 	*t = (struct tokenizer){ .input = in, .line = 1, .flags = flags };
 }
