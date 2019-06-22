@@ -6,13 +6,19 @@
 
 #include "tokenizer.h"
 
+void tokenizer_set_filename(struct tokenizer *t, const char* fn) {
+	t->filename = fn;
+}
+
+#define ARRAY_SIZE(X) (sizeof(X)/sizeof(X[0]))
+
 static int tokenizer_ungetc(struct tokenizer *t, int c)
 {
 	++t->getc_buf.buffered;
-	assert(t->getc_buf.buffered<sizeof(t->getc_buf.buf));
+	assert(t->getc_buf.buffered<ARRAY_SIZE(t->getc_buf.buf));
 	assert(t->getc_buf.cnt > 0);
 	--t->getc_buf.cnt;
-	assert(t->getc_buf.buf[t->getc_buf.cnt % sizeof(t->getc_buf.buf)] == c);
+	assert(t->getc_buf.buf[t->getc_buf.cnt % ARRAY_SIZE(t->getc_buf.buf)] == c);
 	return c;
 }
 static int tokenizer_getc(struct tokenizer *t)
@@ -20,10 +26,10 @@ static int tokenizer_getc(struct tokenizer *t)
 	int c;
 	if(t->getc_buf.buffered) {
 		t->getc_buf.buffered--;
-		c = t->getc_buf.buf[(t->getc_buf.cnt) % sizeof(t->getc_buf.buf)];
+		c = t->getc_buf.buf[(t->getc_buf.cnt) % ARRAY_SIZE(t->getc_buf.buf)];
 	} else {
 		c = getc(t->input);
-		t->getc_buf.buf[t->getc_buf.cnt % sizeof(t->getc_buf.buf)] = c;
+		t->getc_buf.buf[t->getc_buf.cnt % ARRAY_SIZE(t->getc_buf.buf)] = c;
 	}
 	++t->getc_buf.cnt;
 	return c;
@@ -140,7 +146,7 @@ static enum tokentype categorize(const char *s) {
 
 
 static int is_sep(int c) {
-	return !!strchr(" \t\n()[]<>{}\?:;.,!=+-*&|/%#'\"", c);
+	return !!strchr(" \t\n()[]<>{}\?:;.,!=+-*&|/%#'\\\"", c);
 }
 
 static int apply_coords(struct tokenizer *t, struct token* out, char *end, int retval) {
@@ -206,18 +212,74 @@ static int sequence_follows(struct tokenizer *t, int c, const char *which)
 	return 0;
 }
 
-static void ignore_until(struct tokenizer *t, const char* marker, int col_advance)
+int tokenizer_skip_chars(struct tokenizer *t, const char *chars, int *count) {
+	int c;
+	*count = 0;
+	while(1) {
+		c = tokenizer_getc(t);
+		if(c == EOF) return 0;
+		const char *s = chars;
+		int match = 0;
+		while(*s) {
+			if(c==*s) {
+				*count++;
+				match = 1;
+				break;
+			}
+			++s;
+		}
+		if(!match) {
+			tokenizer_ungetc(t, c);
+			return 1;
+		}
+	}
+
+}
+
+int tokenizer_read_until(struct tokenizer *t, const char* marker, int stop_at_nl)
+{
+	int c, marker_is_nl = !strcmp(marker, "\n");
+	char *s = t->buf;
+	while(1) {
+		c = tokenizer_getc(t);
+		if(c == EOF) {
+			*s = 0;
+			return 0;
+		}
+		if(c == '\n') {
+			t->line++;
+			t->column = 0;
+			if(stop_at_nl) {
+				*s = 0;
+				if(marker_is_nl) return 1;
+				return 0;
+			}
+		}
+		if(!sequence_follows(t, c, marker))
+			s = assign_bufchar(t, s, c);
+		else
+			break;
+	}
+	*s = 0;
+	size_t i;
+	for(i=strlen(marker); i > 0; )
+		tokenizer_ungetc(t, marker[--i]);
+	return 1;
+}
+static int ignore_until(struct tokenizer *t, const char* marker, int col_advance)
 {
 	t->column += col_advance;
 	int c;
 	do {
 		c = tokenizer_getc(t);
+		if(c == EOF) return 0;
 		if(c == '\n') {
 			t->line++;
 			t->column = 0;
 		} else t->column++;
 	} while(!sequence_follows(t, c, marker));
 	t->column += strlen(marker)-1;
+	return 1;
 }
 
 void tokenizer_skip_until(struct tokenizer *t, const char *marker)
