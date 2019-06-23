@@ -344,7 +344,14 @@ static int parse_macro(struct tokenizer *t) {
 		if(!backslash_seen) List_add(&new.macro_contents, &cont);
 	}
 	add_macro(macroname, &new);
-	//ret = tokenizer_skip_chars(t, " \t", &ws_count);
+	/* free temp list */
+	size_t i;
+	for(i = 0; i < List_size(&argnames); i++) {
+		char *item;
+		List_get(&argnames, i, &item);
+		free(item);
+	}
+	List_free(&argnames);
 	return 1;
 }
 
