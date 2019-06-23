@@ -39,6 +39,16 @@ static int token_needs_string(struct token *tok) {
 	return 0;
 }
 
+static void tokenizer_from_file(struct tokenizer *t, FILE* f) {
+	tokenizer_init(t, f, TF_PARSE_STRINGS);
+	tokenizer_set_filename(t, "<macro>");
+}
+static void tokenizer_from_mem(struct tokenizer *t, MG* mem, FILE** fout) {
+	void* memptr = mem_getptr(mem, 0, 1);
+	*fout = fmemopen(memptr ? memptr : "", mem->used, "r");
+	tokenizer_from_file(t, *fout);
+}
+
 /* iobuf needs to point to a char[2], which will be used for a character token.
    after success, it'll point to either the original buffer, or the tokenizer's
  */
@@ -211,6 +221,8 @@ static int emit_error_or_warning(struct tokenizer *t, int is_error) {
 	return 1;
 }
 
+static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level);
+
 static int parse_macro(struct tokenizer *t) {
 	int ws_count;
 	int ret = tokenizer_skip_chars(t, " \t", &ws_count);
@@ -296,14 +308,27 @@ static int parse_macro(struct tokenizer *t) {
 					break;
 				}
 			}
-#if 0
-			if(cont.type == TT_MACRO_ARGUMENT) /* found */ {
+			/* no argument, expand if needed*/
+			if(cont.type != TT_MACRO_ARGUMENT && get_macro(t->buf)) {
 				char *bufp;
 				size_t size;
 				FILE *tokf = open_memstream(&bufp, &size);
+				if(!expand_macro(t, tokf, t->buf, 0)) return 0;
+				fflush(tokf);
+				fclose(tokf);
+				tokf = fmemopen(bufp, size, "r");
+				struct tokenizer t2;
+				tokenizer_from_file(&t2, tokf);
+				while(1) {
+					ret = x_tokenizer_next(&t2, &curr);
+					if(curr.type == TT_EOF) break;
+					tokstr_fill(&cont.tokstr, &t2, &curr);
+					List_add(&new.macro_contents, &cont);
+				}
+				fclose(tokf);
+				free(bufp);
+				continue;
 			}
-#endif
-			// FIXME: scan through available macros to expand
 		} else if (curr.type == TT_SEP) {
 			if(curr.value == '\\')
 				backslash_seen = 1;
@@ -323,17 +348,10 @@ static int parse_macro(struct tokenizer *t) {
 	return 1;
 }
 
-static void tokenizer_from_mem(struct tokenizer *t, MG* mem, FILE** fout) {
-	void* memptr = mem_getptr(mem, 0, 1);
-	*fout = fmemopen(memptr ? memptr : "", mem->used, "r");
-	tokenizer_init(t, *fout, TF_PARSE_STRINGS);
-	tokenizer_set_filename(t, "<macro>");
-}
-
 #define MAX_RECURSION 32
 
 //int expand_macro(struct tokenizer *t, khash_t(macro_exp_level) *m_exp, unsigned rec_level) {
-int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level) {
+static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level) {
 	struct macro *m = get_macro(name);
 	if(!m) {
 		emit(out, name);
@@ -362,7 +380,7 @@ int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_
 			int ret = x_tokenizer_next(t, &tok) && tok.type != TT_EOF;
 			if(!ret) return 0;
 			if(need_arg && !parens && is_char(&tok, ',')) {
-				error("unexpected: ,", t, &tok);
+				error("unexpected: ','", t, &tok);
 				return 0;
 			} else if(!parens && is_char(&tok, ',')) {
 				need_arg = 1;
@@ -371,6 +389,9 @@ int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_
 					error("too many arguments for function macro", t, &tok);
 					return 0;
 				}
+				unsigned ws_count;
+				ret = tokenizer_skip_chars(t, " \t", &ws_count);
+				if(!ret) return ret;
 			} else if(is_char(&tok, '(')) {
 				++parens;
 				goto append;
