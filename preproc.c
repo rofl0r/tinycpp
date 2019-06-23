@@ -249,6 +249,8 @@ static int parse_macro(struct tokenizer *t) {
 	mem_init(&new.str_contents);
 
 	if (is_char(&curr, '(')) {
+		ret = tokenizer_skip_chars(t, " \t", &ws_count);
+		if(!ret) return ret;
 		while(1) {
 			ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 			if(!ret) return ret;
@@ -382,7 +384,9 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 			error("expected (", t, &tok);
 			return 0;
 		}
-		unsigned curr_arg = 0, need_arg = 1, parens = 0;
+		unsigned curr_arg = 0, need_arg = 1, parens = 0, ws_count;
+		if(!tokenizer_skip_chars(t, " \t", &ws_count)) return 0;
+
 		while(1) {
 			int ret = x_tokenizer_next(t, &tok) && tok.type != TT_EOF;
 			if(!ret) return 0;
