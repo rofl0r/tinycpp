@@ -21,6 +21,7 @@ struct macro_content {
 struct macro {
 	unsigned num_args;
 	/* XXX */ char marker[4];
+	MG str_contents;
 	List /*<struct macro_content>*/ macro_contents;
 };
 
@@ -38,12 +39,28 @@ static int token_needs_string(struct token *tok) {
 	return 0;
 }
 
+/* iobuf needs to point to a char[2], which will be used for a character token.
+   after success, it'll point to either the original buffer, or the tokenizer's
+ */
+static size_t token_as_string(struct tokenizer *t, struct token *tok, char** iobuf) {
+	if(token_needs_string(tok)) {
+		*iobuf = t->buf;
+		return strlen(t->buf);
+	} else {
+		iobuf[0][0] = tok->value;
+		iobuf[0][1] = 0;
+		return 1;
+	}
+}
+
 static void tokstr_fill(struct token_str_tup *dst, struct tokenizer *t, struct token *src) {
 	dst->tok = *src;
 	dst->strbuf = 0;
 	if(token_needs_string(src))
 		dst->strbuf = strdup(t->buf);
 }
+
+KHASH_MAP_INIT_STR(macro_exp_level, unsigned)
 
 KHASH_MAP_INIT_STR(macros, struct macro)
 
@@ -135,22 +152,22 @@ static int eat_whitespace(struct tokenizer *t, struct token *token, int *count) 
 	return ret;
 }
 
-static void emit(const char *s) {
-	printf("%s", s);
+static void emit(FILE *out, const char *s) {
+	fprintf(out, "%s", s);
 }
 
-static void emit_token(struct token *tok, const char* strbuf) {
+static void emit_token(FILE* out, struct token *tok, const char* strbuf) {
 	if(tok->type == TT_SEP) {
-		printf("%c", tok->value);
+		fprintf(out, "%c", tok->value);
 	} else if(strbuf && token_needs_string(tok)) {
-		printf("%s", strbuf);
+		fprintf(out, "%s", strbuf);
 	} else {
 		dprintf(2, "oops, dunno how to handle\n");
 	}
 }
 
-int parse_file(FILE *f, const char*);
-static int include_file(struct tokenizer *t) {
+int parse_file(FILE *f, const char*, FILE *out);
+static int include_file(struct tokenizer *t, FILE* out) {
 	static const char* inc_chars[] = { "\"", "<", 0};
 	static const char* inc_chars_end[] = { "\"", ">", 0};
 	struct token tok;
@@ -177,7 +194,7 @@ static int include_file(struct tokenizer *t) {
 	assert(tokenizer_next(t, &tok) && is_char(&tok, inc_chars_end[inc1sep][0]));
 
 	tokenizer_set_flags(t, TF_PARSE_STRINGS);
-	return parse_file(f, fn);
+	return parse_file(f, fn, out);
 }
 
 static int emit_error_or_warning(struct tokenizer *t, int is_error) {
@@ -217,6 +234,7 @@ static int parse_macro(struct tokenizer *t) {
 	if(!ret) return ret;
 
 	List_init(&new.macro_contents, sizeof(struct macro_content));
+	mem_init(&new.str_contents);
 
 	if (is_char(&curr, '(')) {
 		while(1) {
@@ -260,6 +278,11 @@ static int parse_macro(struct tokenizer *t) {
 	while(1) {
 		ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 		if(!ret) return ret;
+		{
+			char tbuf[2], *foo = tbuf, **str = &foo;
+			size_t len = token_as_string(t, &curr, str);
+			mem_append(&new.str_contents, *str, len);
+		}
 		struct macro_content cont = {0};
 		if(curr.type == TT_IDENTIFIER) {
 			backslash_seen = 0;
@@ -273,6 +296,13 @@ static int parse_macro(struct tokenizer *t) {
 					break;
 				}
 			}
+#if 0
+			if(cont.type == TT_MACRO_ARGUMENT) /* found */ {
+				char *bufp;
+				size_t size;
+				FILE *tokf = open_memstream(&bufp, &size);
+			}
+#endif
 			// FIXME: scan through available macros to expand
 		} else if (curr.type == TT_SEP) {
 			if(curr.value == '\\')
@@ -293,13 +323,28 @@ static int parse_macro(struct tokenizer *t) {
 	return 1;
 }
 
-int expand_macro(struct tokenizer *t) {
-	struct macro *m = get_macro(t->buf);
+static void tokenizer_from_mem(struct tokenizer *t, MG* mem, FILE** fout) {
+	void* memptr = mem_getptr(mem, 0, 1);
+	*fout = fmemopen(memptr ? memptr : "", mem->used, "r");
+	tokenizer_init(t, *fout, TF_PARSE_STRINGS);
+	tokenizer_set_filename(t, "<macro>");
+}
+
+#define MAX_RECURSION 32
+
+//int expand_macro(struct tokenizer *t, khash_t(macro_exp_level) *m_exp, unsigned rec_level) {
+int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level) {
+	struct macro *m = get_macro(name);
 	if(!m) {
-		emit(t->buf);
+		emit(out, name);
 		return 1;
 	}
+	if(rec_level > MAX_RECURSION) {
+		error("max recursion level reached", t, 0);
+		return 0;
+	}
 
+	//if( get_macro_exp_level(m_exp, t->buf, &exp_lvl) && );
 	size_t i;
 	struct token tok;
 
@@ -339,6 +384,12 @@ int expand_macro(struct tokenizer *t) {
 				}
 				--parens;
 				goto append;
+#if 0
+			} else if (tok.type == TT_IDENTIFIER) {
+				ret = expand_macro(t, t->buf, rec_level+1);
+				if(!ret) return ret;
+				need_arg = 0;
+#endif
 			} else {
 	append:;
 				struct token_str_tup tmp;
@@ -355,17 +406,25 @@ int expand_macro(struct tokenizer *t) {
 			for(j=0; j < List_size(&argvalues[mc->arg_nr]); j++) {
 				struct token_str_tup tmp;
 				assert(List_get(&argvalues[mc->arg_nr], j, &tmp));
-				emit_token(&tmp.tok, tmp.strbuf);
+				if(tmp.tok.type == TT_IDENTIFIER) {
+					struct tokenizer t2;
+					FILE *t2f;
+					tokenizer_from_mem(&t2, &m->str_contents, &t2f);
+					if(!expand_macro(&t2, out, tmp.strbuf, rec_level+1))
+						return 0;
+					fclose(t2f);
+				} else
+					emit_token(out, &tmp.tok, tmp.strbuf);
 			}
 		} else {
-			emit_token(&mc->tokstr.tok, mc->tokstr.strbuf);
+			emit_token(out, &mc->tokstr.tok, mc->tokstr.strbuf);
 		}
 	}
 	return 1;
 }
 
 
-int parse_file(FILE *f, const char *fn) {
+int parse_file(FILE *f, const char *fn, FILE *out) {
 	struct tokenizer t;
 	struct token curr;
 	tokenizer_init(&t, f, TF_PARSE_STRINGS);
@@ -380,7 +439,7 @@ int parse_file(FILE *f, const char *fn) {
 		newline = curr.column == 0;
 		if(newline) {
 			ret = eat_whitespace(&t, &curr, &ws_count);
-			if(ws_count) emit(" ");
+			if(ws_count) emit(out, " ");
 		}
 		if(!ret || curr.type == TT_EOF) break;
 		if(curr.type == TT_SEP && curr.value == '#') {
@@ -392,7 +451,7 @@ int parse_file(FILE *f, const char *fn) {
 			if(index == -1) return 1;
 			switch(index) {
 			case 0:
-				ret = include_file(&t);
+				ret = include_file(&t, out);
 				if(!ret) return ret;
 				break;
 			case 1:
@@ -426,10 +485,11 @@ int parse_file(FILE *f, const char *fn) {
 			dprintf(1, "%s: %s\n", tokentype_to_str(curr.type), t.buf);
 #endif
 		if(curr.type == TT_IDENTIFIER) {
-			if(!expand_macro(&t))
+			khash_t(macro_exp_level) *macro_exp_level = kh_init(macro_exp_level);
+			if(!expand_macro(&t, out, t.buf, 0))
 				return 0;
 		} else {
-			emit_token(&curr, t.buf);
+			emit_token(out, &curr, t.buf);
 		}
 	}
 	if(!ret) {
@@ -440,5 +500,5 @@ int parse_file(FILE *f, const char *fn) {
 
 int main(int argc, char** argv) {
 	macros = kh_init(macros);
-	return !parse_file(stdin, "stdin");
+	return !parse_file(stdin, "stdin", stdout);
 }
