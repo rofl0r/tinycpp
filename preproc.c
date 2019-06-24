@@ -13,7 +13,6 @@ struct token_str_tup {
 
 struct macro {
 	unsigned num_args;
-	/* XXX */ char marker[4];
 	FILE* str_contents;
 	List /*const char* */ argnames;
 };
@@ -50,8 +49,6 @@ static size_t token_as_string(struct tokenizer *t, struct token *tok, char** iob
 		return 1;
 	}
 }
-
-KHASH_MAP_INIT_STR(macro_exp_level, unsigned)
 
 KHASH_MAP_INIT_STR(macros, struct macro)
 
@@ -225,7 +222,7 @@ static int parse_macro(struct tokenizer *t) {
 		return 0;
 	}
 	const char* macroname = strdup(t->buf);
-	struct macro new = { .marker = "ABCD", 0 };
+	struct macro new = { 0 };
 	List_init(&new.argnames, sizeof(char*));
 
 	ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
@@ -313,7 +310,6 @@ static size_t macro_arglist_pos(struct macro *m, const char* iden) {
 
 #define MAX_RECURSION 32
 
-//int expand_macro(struct tokenizer *t, khash_t(macro_exp_level) *m_exp, unsigned rec_level) {
 static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level) {
 	struct macro *m = get_macro(name);
 	if(!m) {
@@ -325,7 +321,6 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		return 0;
 	}
 
-	//if( get_macro_exp_level(m_exp, t->buf, &exp_lvl) && );
 	size_t i;
 	struct token tok;
 	struct FILE_container {
@@ -488,7 +483,6 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 			dprintf(1, "%s: %s\n", tokentype_to_str(curr.type), t.buf);
 #endif
 		if(curr.type == TT_IDENTIFIER) {
-			khash_t(macro_exp_level) *macro_exp_level = kh_init(macro_exp_level);
 			if(!expand_macro(&t, out, t.buf, 0))
 				return 0;
 		} else {
