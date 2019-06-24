@@ -21,7 +21,7 @@ struct macro_content {
 struct macro {
 	unsigned num_args;
 	/* XXX */ char marker[4];
-	MG str_contents;
+	FILE* str_contents;
 	List /*<struct macro_content>*/ macro_contents;
 	List /*const char* */ argnames;
 };
@@ -43,11 +43,6 @@ static int token_needs_string(struct token *tok) {
 static void tokenizer_from_file(struct tokenizer *t, FILE* f) {
 	tokenizer_init(t, f, TF_PARSE_STRINGS);
 	tokenizer_set_filename(t, "<macro>");
-}
-static void tokenizer_from_mem(struct tokenizer *t, MG* mem, FILE** fout) {
-	void* memptr = mem_getptr(mem, 0, 1);
-	*fout = fmemopen(memptr ? memptr : "", mem->used, "r");
-	tokenizer_from_file(t, *fout);
 }
 
 /* iobuf needs to point to a char[2], which will be used for a character token.
@@ -222,6 +217,12 @@ static int emit_error_or_warning(struct tokenizer *t, int is_error) {
 	return 1;
 }
 
+static FILE *freopen_r(FILE *f, char **buf, size_t *size) {
+	fflush(f);
+	fclose(f);
+	return fmemopen(*buf, *size, "r");
+}
+
 static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level);
 
 static int parse_macro(struct tokenizer *t) {
@@ -246,7 +247,6 @@ static int parse_macro(struct tokenizer *t) {
 	if(!ret) return ret;
 
 	List_init(&new.macro_contents, sizeof(struct macro_content));
-	mem_init(&new.str_contents);
 
 	if (is_char(&curr, '(')) {
 		ret = tokenizer_skip_chars(t, " \t", &ws_count);
@@ -288,17 +288,24 @@ static int parse_macro(struct tokenizer *t) {
 	} else {
 		error("unexpected!", t, &curr);
 	}
+
+	struct FILE_container {
+		FILE *f;
+		char *buf;
+		size_t len;
+        } contents;
+	contents.f = open_memstream(&contents.buf, &contents.len);
+
 	int backslash_seen = 0;
 	while(1) {
 		ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 		if(!ret) return ret;
-		{
-			char tbuf[2], *foo = tbuf, **str = &foo;
-			size_t len = token_as_string(t, &curr, str);
-			mem_append(&new.str_contents, *str, len);
-		}
+
 		struct macro_content cont = {0};
 		if(curr.type == TT_IDENTIFIER) {
+
+			emit_token(contents.f, &curr, t->buf);
+
 			backslash_seen = 0;
 			size_t i;
 			for(i=0; i<new.num_args; i++) {
@@ -336,8 +343,11 @@ static int parse_macro(struct tokenizer *t) {
 				backslash_seen = 1;
 			else {
 				if(curr.value == '\n' && !backslash_seen) break;
+				emit_token(contents.f, &curr, t->buf);
 				backslash_seen = 0;
 			}
+		} else {
+			emit_token(contents.f, &curr, t->buf);
 		}
 		if(cont.type != TT_MACRO_ARGUMENT && !(is_char(&curr,  '\\'))) {
 			cont.type = curr.type;
@@ -345,6 +355,7 @@ static int parse_macro(struct tokenizer *t) {
 		}
 		if(!backslash_seen) List_add(&new.macro_contents, &cont);
 	}
+	new.str_contents = freopen_r(contents.f, &contents.buf, &contents.len);
 	add_macro(macroname, &new);
 	return 1;
 }
@@ -440,8 +451,8 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	}
 
 	struct tokenizer t2;
-	FILE *t2f;
-	tokenizer_from_mem(&t2, &m->str_contents, &t2f);
+	tokenizer_from_file(&t2, m->str_contents);
+	fseek(m->str_contents, 0, SEEK_SET);
 	while(1) {
 		int ret = x_tokenizer_next(&t2, &tok);
 		if(!ret) return ret;
@@ -449,6 +460,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		if(tok.type == TT_IDENTIFIER) {
 			size_t arg_nr = macro_arglist_pos(m, t2.buf), j;
 			if(arg_nr != (size_t) -1) {
+				fseek(argvalues[arg_nr].f, 0, SEEK_SET);
 				while(1) {
 					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
 					if(!ret) return ret;
@@ -465,7 +477,6 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		} else
 			emit_token(out, &tok, t2.buf);
 	}
-	fclose(t2f);
 	for(i=0; i < m->num_args; i++) {
 		fclose(argvalues[i].f);
 		free(argvalues[i].buf);
