@@ -10,19 +10,11 @@ struct token_str_tup {
 	struct token tok;
 	const char *strbuf;
 };
-struct macro_content {
-	enum tokentype type;
-	union {
-		struct token_str_tup tokstr;
-		unsigned arg_nr;
-	};
-};
 
 struct macro {
 	unsigned num_args;
 	/* XXX */ char marker[4];
 	FILE* str_contents;
-	List /*<struct macro_content>*/ macro_contents;
 	List /*const char* */ argnames;
 };
 
@@ -57,13 +49,6 @@ static size_t token_as_string(struct tokenizer *t, struct token *tok, char** iob
 		iobuf[0][1] = 0;
 		return 1;
 	}
-}
-
-static void tokstr_fill(struct token_str_tup *dst, struct tokenizer *t, struct token *src) {
-	dst->tok = *src;
-	dst->strbuf = 0;
-	if(token_needs_string(src))
-		dst->strbuf = strdup(t->buf);
 }
 
 KHASH_MAP_INIT_STR(macro_exp_level, unsigned)
@@ -246,8 +231,6 @@ static int parse_macro(struct tokenizer *t) {
 	ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 	if(!ret) return ret;
 
-	List_init(&new.macro_contents, sizeof(struct macro_content));
-
 	if (is_char(&curr, '(')) {
 		ret = tokenizer_skip_chars(t, " \t", &ws_count);
 		if(!ret) return ret;
@@ -301,44 +284,7 @@ static int parse_macro(struct tokenizer *t) {
 		ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 		if(!ret) return ret;
 
-		struct macro_content cont = {0};
-		if(curr.type == TT_IDENTIFIER) {
-
-			emit_token(contents.f, &curr, t->buf);
-
-			backslash_seen = 0;
-			size_t i;
-			for(i=0; i<new.num_args; i++) {
-				const char *item;
-				List_get(&new.argnames, i, &item);
-				if(!strcmp(item, t->buf)) {
-					cont.type = TT_MACRO_ARGUMENT;
-					cont.arg_nr = i;
-					break;
-				}
-			}
-			/* no argument, expand if needed*/
-			if(cont.type != TT_MACRO_ARGUMENT && get_macro(t->buf)) {
-				char *bufp;
-				size_t size;
-				FILE *tokf = open_memstream(&bufp, &size);
-				if(!expand_macro(t, tokf, t->buf, 0)) return 0;
-				fflush(tokf);
-				fclose(tokf);
-				tokf = fmemopen(bufp, size, "r");
-				struct tokenizer t2;
-				tokenizer_from_file(&t2, tokf);
-				while(1) {
-					ret = x_tokenizer_next(&t2, &curr);
-					if(curr.type == TT_EOF) break;
-					tokstr_fill(&cont.tokstr, &t2, &curr);
-					List_add(&new.macro_contents, &cont);
-				}
-				fclose(tokf);
-				free(bufp);
-				continue;
-			}
-		} else if (curr.type == TT_SEP) {
+		if (curr.type == TT_SEP) {
 			if(curr.value == '\\')
 				backslash_seen = 1;
 			else {
@@ -349,11 +295,6 @@ static int parse_macro(struct tokenizer *t) {
 		} else {
 			emit_token(contents.f, &curr, t->buf);
 		}
-		if(cont.type != TT_MACRO_ARGUMENT && !(is_char(&curr,  '\\'))) {
-			cont.type = curr.type;
-			tokstr_fill(&cont.tokstr, t, &curr);
-		}
-		if(!backslash_seen) List_add(&new.macro_contents, &cont);
 	}
 	new.str_contents = freopen_r(contents.f, &contents.buf, &contents.len);
 	add_macro(macroname, &new);
