@@ -27,8 +27,9 @@ static int token_needs_string(struct token *tok) {
                 case TT_OCT_INT_LIT:
                 case TT_DEC_INT_LIT:
 			return 1;
+		default:
+			return 0;
 	}
-	return 0;
 }
 
 static void tokenizer_from_file(struct tokenizer *t, FILE* f) {
