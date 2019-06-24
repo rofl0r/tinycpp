@@ -5,7 +5,6 @@
 #include "../cdev/cdev/agsutils/List.h"
 #include "khash.h"
 
-#define TT_MACRO_ARGUMENT (TT_CUSTOM + 1)
 struct token_str_tup {
 	struct token tok;
 	const char *strbuf;
@@ -130,6 +129,7 @@ static int is_whitespace_token(struct token *token)
 		(token->value == ' ' || token->value == '\t');
 }
 
+/* fetches the next non-whitespace token */
 static int eat_whitespace(struct tokenizer *t, struct token *token, int *count) {
 	*count = 0;
 	int ret = 1;
@@ -381,9 +381,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	}
 
 	for(i=0; i < m->num_args; i++) {
-		fflush(argvalues[i].f);
-		fclose(argvalues[i].f);
-		argvalues[i].f = fmemopen(argvalues[i].buf, argvalues[i].len, "r");
+		argvalues[i].f = freopen_r(argvalues[i].f, &argvalues[i].buf, &argvalues[i].len);
 		tokenizer_from_file(&argvalues[i].t, argvalues[i].f);
 	}
 
