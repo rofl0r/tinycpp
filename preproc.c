@@ -459,9 +459,9 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 	tokenizer_register_marker(&t, MT_MULTILINE_COMMENT_START, "/*"); /**/
 	tokenizer_register_marker(&t, MT_MULTILINE_COMMENT_END, "*/");
 	tokenizer_register_marker(&t, MT_SINGLELINE_COMMENT_START, "//");
-	int ret, newline=1, ws_count = 0;
+	int ret, newline=1, ws_count = 0, skip_conditional_block = 0;
 	const char *macro_name = 0;
-	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "ifdef", "endif", 0};
+	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "else", "ifdef", "endif", 0};
 	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
 		newline = curr.column == 0;
 		if(newline) {
@@ -469,13 +469,19 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 			if(ws_count) emit(out, " ");
 		}
 		if(!ret || curr.type == TT_EOF) break;
-		if(curr.type == TT_SEP && curr.value == '#') {
+		if(skip_conditional_block && !is_char(&curr, '#')) continue;
+		if(is_char(&curr, '#')) {
 			if(!newline) {
 				error("stray #", &t, &curr);
 				return 0;
 			}
 			int index = expect(&t, TT_IDENTIFIER, directives, &curr);
 			if(index == -1) return 1;
+			if(skip_conditional_block) switch(index) {
+				case 0: case 1: case 2: case 3: case 4: case 5: case 8:
+					continue;
+				default: break;
+			}
 			switch(index) {
 			case 0:
 				ret = include_file(&t, out);
@@ -496,9 +502,24 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 			case 4:
 				//remove_macro(&t);
 				break;
-			case 5:
+			case 5: // if
 				// tokenizer_skip_until
 				//evaluate_condition(&t, );
+			case 6: // elif
+			case 7: // else
+				skip_conditional_block = !skip_conditional_block;
+				break;
+			case 8: // ifdef
+				ret = tokenizer_next(&t, &curr) && curr.type != TT_EOF;
+				if(!ret) return ret;
+				ret = eat_whitespace(&t, &curr, &ws_count);
+				if(!ret) return ret;
+				if(!get_macro(t.buf)) {
+					skip_conditional_block = 1;
+				}
+				break;
+			case 9: // endif
+				skip_conditional_block = 0;
 			default:
 				break;
 			}
