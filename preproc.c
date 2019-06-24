@@ -388,6 +388,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	struct tokenizer t2;
 	tokenizer_from_file(&t2, m->str_contents);
 	fseek(m->str_contents, 0, SEEK_SET);
+	int hash_count = 0;
 	while(1) {
 		int ret = x_tokenizer_next(&t2, &tok);
 		if(!ret) return ret;
@@ -395,6 +396,13 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		if(tok.type == TT_IDENTIFIER) {
 			size_t arg_nr = macro_arglist_pos(m, t2.buf), j;
 			if(arg_nr != (size_t) -1) {
+				if(hash_count == 1) {
+					struct token fake = {
+						.type = TT_SEP,
+						.value = '"'
+					};
+					emit_token(out, &fake, argvalues[arg_nr].t.buf);
+				}
 				fseek(argvalues[arg_nr].f, 0, SEEK_SET);
 				while(1) {
 					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
@@ -406,11 +414,33 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					} else
 						emit_token(out, &tok, argvalues[arg_nr].t.buf);
 				}
-			} else
-			if(!expand_macro(&t2, out, t2.buf, rec_level+1))
-				return 0;
-		} else
+				if(hash_count == 1) {
+					struct token fake = {
+						.type = TT_SEP,
+						.value = '"'
+					};
+					emit_token(out, &fake, argvalues[arg_nr].t.buf);
+					hash_count = 0;
+				}
+			} else {
+				if(hash_count == 1) {
+		hash_err:
+					error("'#' is not followed by macro parameter", &t2, &tok);
+					return 0;
+				}
+				if(!expand_macro(&t2, out, t2.buf, rec_level+1))
+					return 0;
+			}
+		} else if(is_char(&tok, '#')) {
+			++hash_count;
+		} else {
+			if(hash_count == 1) goto hash_err;
 			emit_token(out, &tok, t2.buf);
+		}
+		if(hash_count > 2) {
+			error("only two '#' characters allowed for macro expansion", &t2, &tok);
+			return 0;
+		}
 	}
 	for(i=0; i < m->num_args; i++) {
 		fclose(argvalues[i].f);
