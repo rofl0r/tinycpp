@@ -65,7 +65,7 @@ static int add_macro(const char *name, struct macro*m) {
 	khint_t k = kh_put(macros, macros, name, &absent);
 	if (!absent) {
 		// FIXME free contents of macro struct
-		kh_del(macros, macros, k);
+		// kh_del(macros, macros, k);
 	}
 	kh_value(macros, k) = *m;
 	return !absent;
@@ -223,6 +223,12 @@ static int parse_macro(struct tokenizer *t) {
 		return 0;
 	}
 	const char* macroname = strdup(t->buf);
+	if(get_macro(macroname)) {
+		char buf[128];
+		sprintf(buf, "redefinition of macro %s", macroname);
+		warning(buf, t, 0);
+	}
+
 	struct macro new = { 0 };
 	List_init(&new.argnames, sizeof(char*));
 
