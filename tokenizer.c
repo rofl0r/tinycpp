@@ -96,7 +96,10 @@ static int is_hex_int_literal(const char *s) {
 
 static int is_dec_int_literal(const char *s) {
 	if(s[0] == '-') s++;
-	if(s[0] == '0') return 0;
+	if(s[0] == '0') {
+		if(s[1] == 0) return 1;
+		return 0;
+	}
 	while(*s) {
 		if(!isdigit(*(s++))) {
 			return has_ul_tail(s);
