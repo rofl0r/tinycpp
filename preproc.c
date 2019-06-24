@@ -23,6 +23,7 @@ struct macro {
 	/* XXX */ char marker[4];
 	MG str_contents;
 	List /*<struct macro_content>*/ macro_contents;
+	List /*const char* */ argnames;
 };
 
 static int token_needs_string(struct token *tok) {
@@ -239,8 +240,7 @@ static int parse_macro(struct tokenizer *t) {
 	}
 	const char* macroname = strdup(t->buf);
 	struct macro new = { .marker = "ABCD", 0 };
-	List argnames;
-	List_init(&argnames, sizeof(char*));
+	List_init(&new.argnames, sizeof(char*));
 
 	ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 	if(!ret) return ret;
@@ -260,7 +260,7 @@ static int parse_macro(struct tokenizer *t) {
 			}
 			{
 				const char *tmps = strdup(t->buf);
-				List_add(&argnames, &tmps);
+				List_add(&new.argnames, &tmps);
 			}
 			++new.num_args;
 			ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
@@ -303,7 +303,7 @@ static int parse_macro(struct tokenizer *t) {
 			size_t i;
 			for(i=0; i<new.num_args; i++) {
 				const char *item;
-				List_get(&argnames, i, &item);
+				List_get(&new.argnames, i, &item);
 				if(!strcmp(item, t->buf)) {
 					cont.type = TT_MACRO_ARGUMENT;
 					cont.arg_nr = i;
@@ -346,15 +346,17 @@ static int parse_macro(struct tokenizer *t) {
 		if(!backslash_seen) List_add(&new.macro_contents, &cont);
 	}
 	add_macro(macroname, &new);
-	/* free temp list */
-	size_t i;
-	for(i = 0; i < List_size(&argnames); i++) {
-		char *item;
-		List_get(&argnames, i, &item);
-		free(item);
-	}
-	List_free(&argnames);
 	return 1;
+}
+
+static size_t macro_arglist_pos(struct macro *m, const char* iden) {
+	size_t i;
+	for(i = 0; i < List_size(&m->argnames); i++) {
+		char *item;
+		List_get(&m->argnames, i, &item);
+		if(!strcmp(item, iden)) return i;
+	}
+	return (size_t) -1;
 }
 
 #define MAX_RECURSION 32
@@ -374,10 +376,15 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	//if( get_macro_exp_level(m_exp, t->buf, &exp_lvl) && );
 	size_t i;
 	struct token tok;
+	struct FILE_container {
+		FILE *f;
+		char *buf;
+		size_t len;
+		struct tokenizer t;
+	} *argvalues = calloc(m->num_args, sizeof(struct FILE_container));
 
-	List *argvalues = malloc(sizeof(List) * m->num_args);
 	for(i=0; i < m->num_args; i++)
-		List_init(&argvalues[i], sizeof (struct token_str_tup));
+		argvalues[i].f = open_memstream(&argvalues[i].buf, &argvalues[i].len);
 
 	if(m->num_args) {
 		if(expect(t, TT_SEP, (const char*[]){"(", 0}, &tok) != 0) {
@@ -388,8 +395,13 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		if(!tokenizer_skip_chars(t, " \t", &ws_count)) return 0;
 
 		while(1) {
-			int ret = x_tokenizer_next(t, &tok) && tok.type != TT_EOF;
+			int ret = x_tokenizer_next(t, &tok);
 			if(!ret) return 0;
+			if( tok.type == TT_EOF) {
+				dprintf(2, "warning EOF\n");
+				break;
+			}
+
 			if(need_arg && !parens && is_char(&tok, ',')) {
 				error("unexpected: ','", t, &tok);
 				return 0;
@@ -400,12 +412,11 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					error("too many arguments for function macro", t, &tok);
 					return 0;
 				}
-				unsigned ws_count;
 				ret = tokenizer_skip_chars(t, " \t", &ws_count);
 				if(!ret) return ret;
+				continue;
 			} else if(is_char(&tok, '(')) {
 				++parens;
-				goto append;
 			} else if(is_char(&tok, ')')) {
 				if(!parens) {
 					if(curr_arg != m->num_args-1) {
@@ -415,43 +426,51 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					break;
 				}
 				--parens;
-				goto append;
-#if 0
-			} else if (tok.type == TT_IDENTIFIER) {
-				ret = expand_macro(t, t->buf, rec_level+1);
-				if(!ret) return ret;
-				need_arg = 0;
-#endif
-			} else {
-	append:;
-				struct token_str_tup tmp;
-				tokstr_fill(&tmp, t, &tok);
-				List_add(&argvalues[curr_arg], &tmp);
-				need_arg = 0;
 			}
+			need_arg = 0;
+			emit_token(argvalues[curr_arg].f, &tok, t->buf);
 		}
 	}
-	size_t j;
-	for(i=0; i<List_size(&m->macro_contents); i++) {
-		struct macro_content *mc = List_getptr(&m->macro_contents, i);
-		if(mc->type == TT_MACRO_ARGUMENT) {
-			for(j=0; j < List_size(&argvalues[mc->arg_nr]); j++) {
-				struct token_str_tup tmp;
-				assert(List_get(&argvalues[mc->arg_nr], j, &tmp));
-				if(tmp.tok.type == TT_IDENTIFIER) {
-					struct tokenizer t2;
-					FILE *t2f;
-					tokenizer_from_mem(&t2, &m->str_contents, &t2f);
-					if(!expand_macro(&t2, out, tmp.strbuf, rec_level+1))
-						return 0;
-					fclose(t2f);
-				} else
-					emit_token(out, &tmp.tok, tmp.strbuf);
-			}
-		} else {
-			emit_token(out, &mc->tokstr.tok, mc->tokstr.strbuf);
-		}
+
+	for(i=0; i < m->num_args; i++) {
+		fflush(argvalues[i].f);
+		fclose(argvalues[i].f);
+		argvalues[i].f = fmemopen(argvalues[i].buf, argvalues[i].len, "r");
+		tokenizer_from_file(&argvalues[i].t, argvalues[i].f);
 	}
+
+	struct tokenizer t2;
+	FILE *t2f;
+	tokenizer_from_mem(&t2, &m->str_contents, &t2f);
+	while(1) {
+		int ret = x_tokenizer_next(&t2, &tok);
+		if(!ret) return ret;
+		if(tok.type == TT_EOF) break;
+		if(tok.type == TT_IDENTIFIER) {
+			size_t arg_nr = macro_arglist_pos(m, t2.buf), j;
+			if(arg_nr != (size_t) -1) {
+				while(1) {
+					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
+					if(!ret) return ret;
+					if(tok.type == TT_EOF) break;
+					if(tok.type == TT_IDENTIFIER) {
+						if(!expand_macro(&argvalues[arg_nr].t, out, argvalues[arg_nr].t.buf, rec_level+1))
+							return 0;
+					} else
+						emit_token(out, &tok, argvalues[arg_nr].t.buf);
+				}
+			} else
+			if(!expand_macro(&t2, out, t2.buf, rec_level+1))
+				return 0;
+		} else
+			emit_token(out, &tok, t2.buf);
+	}
+	fclose(t2f);
+	for(i=0; i < m->num_args; i++) {
+		fclose(argvalues[i].f);
+		free(argvalues[i].buf);
+	}
+	free(argvalues);
 	return 1;
 }
 
