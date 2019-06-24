@@ -480,6 +480,57 @@ static int skip_next_and_ws(struct tokenizer *t, struct token *tok) {
 	return ret;
 }
 
+/* FIXME: at the moment we only evaluate the first decimal number */
+static int do_eval(struct tokenizer *t, int *result) {
+	*result = 0;
+	struct token curr;
+	while(1) {
+		int ret = tokenizer_next(t, &curr);
+		if(!ret) return ret;
+		if(curr.type == TT_EOF) break;
+		if(curr.type == TT_DEC_INT_LIT) {
+			*result = atoi(t->buf);
+			break;
+		}
+	}
+	return 1;
+}
+
+static int evaluate_condition(struct tokenizer *t, int *result) {
+	int ret, backslash_seen = 0;
+	struct token curr;
+	char *bufp;
+	size_t size;
+	FILE *f = open_memstream(&bufp, &size);
+	while(1) {
+		ret = tokenizer_next(t, &curr);
+		if(!ret) return ret;
+		if(curr.type == TT_IDENTIFIER) {
+			if(!expand_macro(t, f, t->buf, 0)) return 0;
+		} else if(curr.type == TT_SEP) {
+			if(curr.value == '\\')
+				backslash_seen = 1;
+			else {
+				if(curr.value == '\n') {
+					if(!backslash_seen) break;
+				} else {
+					emit_token(f, &curr, t->buf);
+				}
+				backslash_seen = 0;
+			}
+		} else {
+			emit_token(f, &curr, t->buf);
+		}
+	}
+	f = freopen_r(f, &bufp, &size);
+	struct tokenizer t2;
+	tokenizer_from_file(&t2, f);
+	ret = do_eval(&t2, result);
+	fclose(f);
+	free(bufp);
+	return ret;
+}
+
 int parse_file(FILE *f, const char *fn, FILE *out) {
 	struct tokenizer t;
 	struct token curr;
@@ -488,7 +539,24 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 	tokenizer_register_marker(&t, MT_MULTILINE_COMMENT_START, "/*"); /**/
 	tokenizer_register_marker(&t, MT_MULTILINE_COMMENT_END, "*/");
 	tokenizer_register_marker(&t, MT_SINGLELINE_COMMENT_START, "//");
-	int ret, newline=1, ws_count = 0, skip_conditional_block = 0;
+	int ret, newline=1, ws_count = 0;
+
+	int if_level = 0, if_level_active = 0, if_level_satisfied = 0;
+
+#define all_levels_active() (if_level_active == if_level)
+#define prev_level_active() (if_level_active == if_level-1)
+#define set_level(X, V) do { \
+		if(if_level_active > X) if_level_active = X; \
+		if(if_level_satisfied > X) if_level_satisfied = X; \
+		if(V != -1) { \
+			if(V) if_level_active = X; \
+			else if(if_level_active == X) if_level_active = X-1; \
+			if(V && if_level_active == X) if_level_satisfied = X; \
+		} \
+		if_level = X; \
+	} while(0)
+#define skip_conditional_block (if_level > if_level_active)
+
 	const char *macro_name = 0;
 	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "else", "ifdef", "endif", 0};
 	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
@@ -507,7 +575,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 			int index = expect(&t, TT_IDENTIFIER, directives, &curr);
 			if(index == -1) return 1;
 			if(skip_conditional_block) switch(index) {
-				case 0: case 1: case 2: case 3: case 4: case 5: case 8:
+				case 0: case 1: case 2: case 3: case 4:
 					continue;
 				default: break;
 			}
@@ -537,20 +605,46 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				undef_macro(t.buf);
 				break;
 			case 5: // if
-				// tokenizer_skip_until
-				//evaluate_condition(&t, );
+				if(all_levels_active()) {
+					if(!evaluate_condition(&t, &ret)) return 0;
+					set_level(if_level + 1, ret);
+				} else {
+					set_level(if_level + 1, 0);
+				}
+				break;
 			case 6: // elif
+				if(prev_level_active() && if_level_satisfied < if_level) {
+					if(!evaluate_condition(&t, &ret)) return 0;
+					if(ret) {
+						if_level_active = if_level;
+						if_level_satisfied = if_level;
+					}
+				} else if(if_level_active == if_level) {
+					--if_level_active;
+				}
+				break;
 			case 7: // else
-				skip_conditional_block = !skip_conditional_block;
+				if(prev_level_active() && if_level_satisfied < if_level) {
+					if(1) {
+						if_level_active = if_level;
+						if_level_satisfied = if_level;
+					}
+				} else if(if_level_active == if_level) {
+					--if_level_active;
+				}
 				break;
 			case 8: // ifdef
 				if(!skip_next_and_ws(&t, &curr)) return 0;
-				if(!get_macro(t.buf)) {
-					skip_conditional_block = 1;
+				ret = !!get_macro(t.buf);
+
+				if(all_levels_active()) {
+					set_level(if_level + 1, ret);
+				} else {
+					set_level(if_level + 1, 0);
 				}
 				break;
 			case 9: // endif
-				skip_conditional_block = 0;
+				set_level(if_level-1, -1);
 			default:
 				break;
 			}
