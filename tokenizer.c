@@ -290,12 +290,11 @@ void tokenizer_skip_until(struct tokenizer *t, const char *marker)
 int tokenizer_next(struct tokenizer *t, struct token* out) {
 	char *s = t->buf;
 	out->value = 0;
+	int c = 0;
 	while(1) {
-		int c = tokenizer_getc(t);
-		if(c == EOF) {
-			out->type = TT_EOF;
-			return apply_coords(t, out, s, 1);
-		}
+		c = tokenizer_getc(t);
+		if(c == EOF) break;
+
 		/* components of multi-line comment marker might be terminals themselves */
 		if(sequence_follows(t, c, t->marker[MT_MULTILINE_COMMENT_START])) {
 			ignore_until(t, t->marker[MT_MULTILINE_COMMENT_END], strlen(t->marker[MT_MULTILINE_COMMENT_START]));
@@ -317,7 +316,12 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 		}
 	}
 	if(s == t->buf) {
-		int c = tokenizer_getc(t);
+		if(c == EOF) {
+			out->type = TT_EOF;
+			return apply_coords(t, out, s, 1);
+		}
+
+		c = tokenizer_getc(t);
 		s = assign_bufchar(t, s, c);
 		*s = 0;
 		//s = assign_bufchar(t, s, 0);
