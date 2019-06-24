@@ -71,6 +71,22 @@ static int add_macro(const char *name, struct macro*m) {
 	return !absent;
 }
 
+static int undef_macro(const char *name) {
+	khint_t k = kh_get(macros, macros, name);
+	if(k == kh_end(macros)) return 0;
+	struct macro *m = &kh_value(macros, k);
+	fclose(m->str_contents); // TODO: free associated buffer
+	size_t i;
+	for(i = 0; i < List_size(&m->argnames); i++) {
+		char *item;
+		List_get(&m->argnames, i, &item);
+		free(item);
+	}
+	List_free(&m->argnames);
+	kh_del(macros, macros, k);
+	return 1;
+}
+
 static void error_or_warning(const char *err, const char* type, struct tokenizer *t, struct token *curr) {
 	unsigned column = curr ? curr->column : t->column;
 	unsigned line  = curr ? curr->line : t->line;
@@ -456,6 +472,13 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	return 1;
 }
 
+static int skip_next_and_ws(struct tokenizer *t, struct token *tok) {
+	int ret = tokenizer_next(t, tok) && tok->type != TT_EOF;
+	if(!ret) return ret;
+	unsigned ws_count;
+	ret = eat_whitespace(t, tok, &ws_count);
+	return ret;
+}
 
 int parse_file(FILE *f, const char *fn, FILE *out) {
 	struct tokenizer t;
@@ -506,7 +529,12 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				if(!ret) return ret;
 				break;
 			case 4:
-				//remove_macro(&t);
+				if(!skip_next_and_ws(&t, &curr)) return 0;
+				if(curr.type != TT_IDENTIFIER) {
+					error("expected identifier", &t, &curr);
+					return 0;
+				}
+				undef_macro(t.buf);
 				break;
 			case 5: // if
 				// tokenizer_skip_until
@@ -516,10 +544,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				skip_conditional_block = !skip_conditional_block;
 				break;
 			case 8: // ifdef
-				ret = tokenizer_next(&t, &curr) && curr.type != TT_EOF;
-				if(!ret) return ret;
-				ret = eat_whitespace(&t, &curr, &ws_count);
-				if(!ret) return ret;
+				if(!skip_next_and_ws(&t, &curr)) return 0;
 				if(!get_macro(t.buf)) {
 					skip_conditional_block = 1;
 				}
