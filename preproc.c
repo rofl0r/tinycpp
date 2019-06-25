@@ -13,6 +13,7 @@ struct token_str_tup {
 struct macro {
 	unsigned num_args;
 	FILE* str_contents;
+	char *str_contents_buf;
 	List /*const char* */ argnames;
 };
 
@@ -75,7 +76,8 @@ static int undef_macro(const char *name) {
 	khint_t k = kh_get(macros, macros, name);
 	if(k == kh_end(macros)) return 0;
 	struct macro *m = &kh_value(macros, k);
-	fclose(m->str_contents); // TODO: free associated buffer
+	fclose(m->str_contents);
+	free(m->str_contents_buf);
 	size_t i;
 	for(i = 0; i < List_size(&m->argnames); i++) {
 		char *item;
@@ -316,6 +318,7 @@ static int parse_macro(struct tokenizer *t) {
 		}
 	}
 	new.str_contents = freopen_r(contents.f, &contents.buf, &contents.len);
+	new.str_contents_buf = contents.buf;
 done:
 	add_macro(macroname, &new);
 	return 1;
