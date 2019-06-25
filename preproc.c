@@ -296,6 +296,9 @@ static int parse_macro(struct tokenizer *t) {
 			}
 		}
 		break_loop1:;
+	} else if(is_whitespace_token(&curr)) {
+		ret = tokenizer_skip_chars(t, " \t", &ws_count);
+		if(!ret) return ret;
 	} else if(is_char(&curr, '\n')) {
 		/* content-less macro */
 		goto done;
