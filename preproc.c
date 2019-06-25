@@ -688,6 +688,10 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 	if(!ret) {
 		error("unknown", &t, &curr);
 	}
+	if(if_level) {
+		error("unterminated #if", &t, &curr);
+		return 0;
+	}
 	return ret;
 }
 
