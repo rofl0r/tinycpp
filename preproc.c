@@ -388,11 +388,14 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 				dprintf(2, "warning EOF\n");
 				break;
 			}
-
-			if(need_arg && !parens && is_char(&tok, ',')) {
-				error("unexpected: ','", t, &tok);
-				return 0;
-			} else if(!parens && is_char(&tok, ',')) {
+			if(!parens && is_char(&tok, ',')) {
+				if(need_arg) {
+					if(ws_count) emit(argvalues[curr_arg].f, " ");
+					else {
+						error("unexpected: ','", t, &tok);
+						return 0;
+					}
+				}
 				need_arg = 1;
 				curr_arg++;
 				if(curr_arg >= m->num_args) {
