@@ -225,7 +225,7 @@ int tokenizer_skip_chars(struct tokenizer *t, const char *chars, int *count) {
 		int match = 0;
 		while(*s) {
 			if(c==*s) {
-				++*count;
+				++(*count);
 				match = 1;
 				break;
 			}
