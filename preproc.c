@@ -286,10 +286,9 @@ static int parse_macro(struct tokenizer *t) {
 			}
 		}
 		break_loop1:;
-	} else if (is_whitespace_token(&curr)) {
-		/* do nothing */
-	} else {
-		error("unexpected!", t, &curr);
+	} else if(is_char(&curr, '\n')) {
+		/* content-less macro */
+		goto done;
 	}
 
 	struct FILE_container {
@@ -317,6 +316,7 @@ static int parse_macro(struct tokenizer *t) {
 		}
 	}
 	new.str_contents = freopen_r(contents.f, &contents.buf, &contents.len);
+done:
 	add_macro(macroname, &new);
 	return 1;
 }
@@ -407,6 +407,8 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		tokenizer_from_file(&argvalues[i].t, argvalues[i].f);
 	}
 
+	if(!m->str_contents) goto cleanup;
+
 	struct tokenizer t2;
 	tokenizer_from_file(&t2, m->str_contents);
 	fseek(m->str_contents, 0, SEEK_SET);
@@ -464,6 +466,8 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 			return 0;
 		}
 	}
+
+cleanup:
 	for(i=0; i < m->num_args; i++) {
 		fclose(argvalues[i].f);
 		free(argvalues[i].buf);
@@ -501,6 +505,12 @@ static int evaluate_condition(struct tokenizer *t, int *result) {
 	struct token curr;
 	char *bufp;
 	size_t size;
+	ret = tokenizer_next(t, &curr);
+	if(!ret) return ret;
+	if(!is_whitespace_token(&curr)) {
+		error("expected whitespace after if/elif", t, &curr);
+		return 0;
+	}
 	FILE *f = open_memstream(&bufp, &size);
 	while(1) {
 		ret = tokenizer_next(t, &curr);
@@ -523,6 +533,10 @@ static int evaluate_condition(struct tokenizer *t, int *result) {
 		}
 	}
 	f = freopen_r(f, &bufp, &size);
+	if(!f || size == 0) {
+		error("#(el)if with no expression", t, &curr);
+		return 0;
+	}
 	struct tokenizer t2;
 	tokenizer_from_file(&t2, f);
 	ret = do_eval(&t2, result);
