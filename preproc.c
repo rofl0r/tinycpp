@@ -147,7 +147,7 @@ static int is_whitespace_token(struct token *token)
 		(token->value == ' ' || token->value == '\t');
 }
 
-/* fetches the next non-whitespace token */
+/* skips until the next non-whitespace token (if the current one is one too)*/
 static int eat_whitespace(struct tokenizer *t, struct token *token, int *count) {
 	*count = 0;
 	int ret = 1;
@@ -156,6 +156,14 @@ static int eat_whitespace(struct tokenizer *t, struct token *token, int *count) 
 		ret = x_tokenizer_next(t, token);
 		if(!ret) break;
 	}
+	return ret;
+}
+/* fetches the next token until it is non-whitespace */
+static int skip_next_and_ws(struct tokenizer *t, struct token *tok) {
+	int ret = tokenizer_next(t, tok);
+	if(!ret) return ret;
+	unsigned ws_count;
+	ret = eat_whitespace(t, tok, &ws_count);
 	return ret;
 }
 
@@ -511,14 +519,6 @@ cleanup:
 	return 1;
 }
 
-static int skip_next_and_ws(struct tokenizer *t, struct token *tok) {
-	int ret = tokenizer_next(t, tok) && tok->type != TT_EOF;
-	if(!ret) return ret;
-	unsigned ws_count;
-	ret = eat_whitespace(t, tok, &ws_count);
-	return ret;
-}
-
 /* FIXME: at the moment we only evaluate the first decimal number */
 static int do_eval(struct tokenizer *t, int *result) {
 	*result = 0;
@@ -682,7 +682,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				}
 				break;
 			case 8: // ifdef
-				if(!skip_next_and_ws(&t, &curr)) return 0;
+				if(!skip_next_and_ws(&t, &curr) || curr.type == TT_EOF) return 0;
 				ret = !!get_macro(t.buf);
 
 				if(all_levels_active()) {
