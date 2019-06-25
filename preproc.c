@@ -346,6 +346,9 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		error("max recursion level reached", t, 0);
 		return 0;
 	}
+#ifdef DEBUG
+	dprintf(2, "expanding macro %s (%s)\n", name, m->str_contents_buf);
+#endif
 
 	size_t i;
 	struct token tok;
