@@ -150,7 +150,7 @@ static int eat_whitespace(struct tokenizer *t, struct token *token, int *count) 
 	*count = 0;
 	int ret = 1;
 	while (is_whitespace_token(token)) {
-		*count++;
+		++(*count);
 		ret = x_tokenizer_next(t, token);
 		if(!ret) break;
 	}
@@ -577,7 +577,6 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 		newline = curr.column == 0;
 		if(newline) {
 			ret = eat_whitespace(&t, &curr, &ws_count);
-			if(ws_count) emit(out, " ");
 		}
 		if(!ret || curr.type == TT_EOF) break;
 		if(skip_conditional_block && !is_char(&curr, '#')) continue;
@@ -663,6 +662,11 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				break;
 			}
 			continue;
+		} else {
+			while(ws_count) {
+				emit(out, " ");
+				--ws_count;
+			}
 		}
 #if DEBUG
 		dprintf(1, "(stdin:%u,%u) ", curr.line, curr.column);
