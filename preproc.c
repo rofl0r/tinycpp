@@ -105,6 +105,10 @@ static void warning(const char *err, struct tokenizer *t, struct token *curr) {
 	error_or_warning(err, "warning", t, curr);
 }
 
+static void emit(FILE *out, const char *s) {
+	fprintf(out, "%s", s);
+}
+
 static int x_tokenizer_next(struct tokenizer *t, struct token *tok) {
 	int ret = tokenizer_next(t, tok);
 	if(ret == 0) {
@@ -147,6 +151,13 @@ static int is_whitespace_token(struct token *token)
 		(token->value == ' ' || token->value == '\t');
 }
 
+static void flush_whitespace(FILE *out, int *ws_count) {
+	while(*ws_count > 0) {
+		emit(out, " ");
+		--(*ws_count);
+	}
+}
+
 /* skips until the next non-whitespace token (if the current one is one too)*/
 static int eat_whitespace(struct tokenizer *t, struct token *token, int *count) {
 	*count = 0;
@@ -165,10 +176,6 @@ static int skip_next_and_ws(struct tokenizer *t, struct token *tok) {
 	unsigned ws_count;
 	ret = eat_whitespace(t, tok, &ws_count);
 	return ret;
-}
-
-static void emit(FILE *out, const char *s) {
-	fprintf(out, "%s", s);
 }
 
 static void emit_token(FILE* out, struct token *tok, const char* strbuf) {
@@ -439,11 +446,13 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	tokenizer_from_file(&t2, m->str_contents);
 	fseek(m->str_contents, 0, SEEK_SET);
 	int hash_count = 0;
+	int ws_count = 0;
 	while(1) {
 		int ret = x_tokenizer_next(&t2, &tok);
 		if(!ret) return ret;
 		if(tok.type == TT_EOF) break;
 		if(tok.type == TT_IDENTIFIER) {
+			flush_whitespace(output, &ws_count);
 			size_t arg_nr = macro_arglist_pos(m, t2.buf), j;
 			if(arg_nr != (size_t) -1) {
 				if(hash_count == 1) {
@@ -486,15 +495,27 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 			}
 		} else if(is_char(&tok, '#')) {
 			++hash_count;
+		} else if(is_whitespace_token(&tok)) {
+			ws_count++;
 		} else {
 			if(hash_count == 1) goto hash_err;
+			flush_whitespace(output, &ws_count);
 			emit_token(output, &tok, t2.buf);
 		}
 		if(hash_count > 2) {
 			error("only two '#' characters allowed for macro expansion", &t2, &tok);
 			return 0;
 		}
+		/* handle token concatention operator ## by emitting whitespace before/after*/
+		if(!is_whitespace_token(&tok) && !ws_count) {
+			flush_whitespace(output, &ws_count);
+		} else if(ws_count && hash_count == 2) {
+			ret = tokenizer_skip_chars(&t2, " \t", &ws_count);
+			if(!ret) return ret;
+			ws_count = 0;
+		}
 	}
+	flush_whitespace(output, &ws_count);
 
 	/* we need to expand macros after the macro arguments have been inserted */
 	if(m->num_args) {
