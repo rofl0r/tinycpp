@@ -352,6 +352,103 @@ static size_t macro_arglist_pos(struct macro *m, const char* iden) {
 	return (size_t) -1;
 }
 
+
+struct macro_info {
+	const char *name;
+	unsigned nest;
+	unsigned first;
+	unsigned last;
+};
+
+unsigned get_macro_info(struct tokenizer *t,
+		struct macro_info *mi_list, size_t *mi_cnt,
+		unsigned nest, unsigned tpos, const char *name) {
+	unsigned brace_lvl = 0;
+	while(1) {
+		struct token tok;
+		int ret = tokenizer_next(t, &tok);
+		if(!ret || tok.type == TT_EOF) break;
+#ifdef DEBUG
+		dprintf(2, "(%s) nest %d, brace %zu t: %s\n", name, nest, brace_lvl, t->buf);
+#endif
+		struct macro* m = 0;
+		if(tok.type == TT_IDENTIFIER && (m = get_macro(t->buf))) {
+			const char* newname = strdup(t->buf);
+			if(m->num_args > 0) {
+				unsigned tpos_save = tpos;
+				tpos = get_macro_info(t, mi_list, mi_cnt, nest+1, tpos+1, newname);
+				mi_list[*mi_cnt] = (struct macro_info) {
+					.name = newname,
+					.nest=nest+1,
+					.first = tpos_save,
+					.last = tpos + 1};
+				++(*mi_cnt);
+			} else {
+				mi_list[*mi_cnt] = (struct macro_info) {
+					.name = newname,
+					.nest=nest+1,
+					.first = tpos,
+					.last = tpos + 1};
+				++(*mi_cnt);
+			}
+		} else if(is_char(&tok, '(')) {
+			++brace_lvl;
+		} else if(is_char(&tok, ')')) {
+			--brace_lvl;
+			if(brace_lvl == 0) break;
+		}
+		++tpos;
+	}
+	return tpos;
+}
+
+struct FILE_container {
+	FILE *f;
+	char *buf;
+	size_t len;
+	struct tokenizer t;
+};
+
+static void free_file_container(struct FILE_container *fc) {
+	fclose(fc->f);
+	free(fc->buf);
+}
+
+static int mem_tokenizers_join(
+	struct FILE_container* org, struct FILE_container *inj,
+	struct FILE_container* result,
+	unsigned first, unsigned last) {
+	result->f = open_memstream(&result->buf, &result->len);
+	size_t i;
+	struct token tok;
+	int ret;
+	fseek(org->f, 0, SEEK_SET);
+	for(i=0; i<first; ++i) {
+		ret = tokenizer_next(&org->t, &tok);
+		assert(!ret && tok.type != TT_EOF);
+		emit_token(result->f, &tok, org->buf);
+	}
+	int cnt = 0;
+	while(1) {
+		ret = tokenizer_next(&inj->t, &tok);
+		if(!ret || tok.type == TT_EOF) break;
+		emit_token(result->f, &tok, inj->buf);
+		++cnt;
+	}
+	int diff = cnt - ((int) last - (int) first);
+	for(i = 0; i < last - first; ++i)
+		tokenizer_next(&org->t, &tok);
+	while(1) {
+		ret = tokenizer_next(&org->t, &tok);
+		if(!ret || tok.type == TT_EOF) break;
+		emit_token(result->f, &tok, org->buf);
+	}
+	result->f = freopen_r(result->f, &result->buf, &result->len);
+	tokenizer_from_file(&result->t, result->f);
+	return diff;
+}
+
+
 #define MAX_RECURSION 32
 
 static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level) {
@@ -370,12 +467,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 
 	size_t i;
 	struct token tok;
-	struct FILE_container {
-		FILE *f;
-		char *buf;
-		size_t len;
-		struct tokenizer t;
-	} *argvalues = calloc(m->num_args, sizeof(struct FILE_container));
+	struct FILE_container *argvalues = calloc(m->num_args, sizeof(struct FILE_container));
 
 	for(i=0; i < m->num_args; i++)
 		argvalues[i].f = open_memstream(&argvalues[i].buf, &argvalues[i].len);
@@ -528,17 +620,94 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		dprintf(2, "contents with args expanded: %s\n", cwae.buf);
 #endif
 		tokenizer_from_file(&cwae.t, cwae.f);
+		size_t mac_cnt = 0;
+		while(1) {
+			int ret = x_tokenizer_next(&cwae.t, &tok);
+			if(!ret || tok.type == TT_EOF) break;
+			if(tok.type == TT_IDENTIFIER && get_macro(cwae.t.buf))
+				++mac_cnt;
+		}
+
+		fseek(cwae.f, 0, SEEK_SET);
+		struct macro_info *mcs = calloc(mac_cnt, sizeof(struct macro_info));
+		{
+			size_t mac_iter = 0;
+			get_macro_info(&cwae.t, mcs, &mac_iter, 0, 0, "null");
+		}
+		size_t i; int depth = 0;
+		for(i = 0; i < mac_cnt; ++i) {
+			if(mcs[i].nest > depth) depth = mcs[i].nest;
+		}
+		struct filecont_and_mi {
+			struct FILE_container fc;
+			size_t mi;
+		} *expanded = calloc(mac_cnt, sizeof(struct filecont_and_mi));
+		size_t mi = 0;
+		while(depth > -1) {
+			for(i = 0; i < mac_cnt; ++i) if(mcs[i].nest == depth) {
+				fseek(cwae.f, 0, SEEK_SET);
+				size_t j;
+				struct token utok;
+				for(j = 0; j < mcs[i].first+1; ++j)
+					tokenizer_next(&cwae.t, &utok);
+				expanded[mi].mi = i;
+				expanded[mi].fc.f = open_memstream(&expanded[mi].fc.buf, &expanded[mi].fc.len);
+				if(!expand_macro(&cwae.t, expanded[mi].fc.f, mcs[i].name, rec_level+1))
+					return 0;
+				expanded[mi].fc.f = freopen_r(expanded[mi].fc.f, &expanded[mi].fc.buf, &expanded[mi].fc.len);
+				tokenizer_from_file(&expanded[mi].fc.t, expanded[mi].fc.f);
+				mi++;
+			}
+			--depth;
+		}
+#ifdef DEBUG
+		for(i = 0; i < mac_cnt; ++i) {
+			dprintf(2, "exp %s (%s)\n", mcs[expanded[i].mi].name, expanded[i].fc.buf);
+		}
+#endif
+		fseek(cwae.f, 0, SEEK_SET);
+		size_t curr_exp = 0;
+		while(curr_exp < mac_cnt) {
+			struct macro_info *mi = &mcs[expanded[curr_exp].mi];
+			struct FILE_container *t2 = &expanded[curr_exp].fc;
+			struct FILE_container tmp = {0};
+			int diff = mem_tokenizers_join(&cwae, t2, &tmp, mi->first, mi->last);
+			free_file_container(&cwae);
+			cwae = tmp;
+			if(diff != 0) {
+				size_t exp2s = curr_exp + 1;
+				while(exp2s < mac_cnt) {
+					struct macro_info *mi2 = &mcs[expanded[exp2s].mi];
+					struct FILE_container *t3 = &expanded[exp2s].fc;
+					/* modified element mi can be either inside, after or before
+					   another macro. the after case doesn't affect us. */
+					if(mi->first >= mi2->first && mi->last <= mi2->last) {
+						/* inside m2 */
+						unsigned start = mi->first - mi2->first;
+						mem_tokenizers_join(t3, t2, &tmp, start, start+(mi->last - mi->first));
+						free_file_container(t3);
+						*t3 = tmp;
+						mi2->last += diff;
+					} else if (mi->first < mi2->first) {
+						/* before m2 */
+						mi2->first += diff;
+						mi2->last += diff;
+					}
+					++exp2s;
+				}
+			}
+			++curr_exp;
+		}
+		fseek(cwae.f, 0, SEEK_SET);
 		while(1) {
 			int ret = x_tokenizer_next(&cwae.t, &tok);
 			if(!ret) return ret;
 			if(tok.type == TT_EOF) break;
-			if(tok.type == TT_IDENTIFIER) {
-				if(!expand_macro(&cwae.t, out, cwae.t.buf, rec_level+1))
-					return 0;
-			} else emit_token(out, &tok, cwae.t.buf);
+			emit_token(out, &tok, cwae.t.buf);
 		}
-		fclose(cwae.f);
-		free(cwae.buf);
+		free_file_container(&cwae);
+		free(mcs);
+		free(expanded);
 	}
 
 cleanup:
