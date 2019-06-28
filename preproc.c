@@ -758,7 +758,11 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 	return ret;
 }
 
-int main(int argc, char** argv) {
+int preprocessor_run(FILE* in, const char* inname, FILE* out) {
 	macros = kh_init(macros);
-	return !parse_file(stdin, "stdin", stdout);
+	return parse_file(in, inname, out);
+}
+
+int main(int argc, char** argv) {
+	return !preprocessor_run(stdin, "stdin", stdout);
 }
