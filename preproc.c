@@ -380,7 +380,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	for(i=0; i < m->num_args; i++)
 		argvalues[i].f = open_memstream(&argvalues[i].buf, &argvalues[i].len);
 
-	/* parse the contents of the macro call */
+	/* replace named arguments in the contents of the macro call */
 	if(m->num_args) {
 		if(expect(t, TT_SEP, (const char*[]){"(", 0}, &tok) != 0) {
 			error("expected (", t, &tok);
@@ -524,6 +524,9 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	/* we need to expand macros after the macro arguments have been inserted */
 	if(m->num_args) {
 		cwae.f = freopen_r(cwae.f, &cwae.buf, &cwae.len);
+#ifdef DEBUG
+		dprintf(2, "contents with args expanded: %s\n", cwae.buf);
+#endif
 		tokenizer_from_file(&cwae.t, cwae.f);
 		while(1) {
 			int ret = x_tokenizer_next(&cwae.t, &tok);
