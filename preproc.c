@@ -243,6 +243,26 @@ static FILE *freopen_r(FILE *f, char **buf, size_t *size) {
 	return fmemopen(*buf, *size, "r");
 }
 
+static int consume_nl_and_ws(struct tokenizer *t, struct token *tok, int expected) {
+	if(!x_tokenizer_next(t, tok)) {
+err:
+		error("unexpected", t, tok);
+		return 0;
+	}
+	if(expected) {
+		if(tok->type != TT_SEP || tok->value != expected) goto err;
+		switch(expected) {
+			case '\\' : expected = '\n'; break;
+			case '\n' : expected = 0; break;
+		}
+	} else {
+		if(is_whitespace_token(tok)) ;
+		else if(is_char(tok, '\\')) expected = '\n';
+		else return 1;
+	}
+	return consume_nl_and_ws(t, tok, expected);
+}
+
 static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level);
 
 static int parse_macro(struct tokenizer *t) {
@@ -260,6 +280,9 @@ static int parse_macro(struct tokenizer *t) {
 		return 0;
 	}
 	const char* macroname = strdup(t->buf);
+#ifdef DEBUG
+	dprintf(2, "parsing macro %s\n", macroname);
+#endif
 	if(get_macro(macroname)) {
 		char buf[128];
 		sprintf(buf, "redefinition of macro %s", macroname);
@@ -275,32 +298,31 @@ static int parse_macro(struct tokenizer *t) {
 
 	if (is_char(&curr, '(')) {
 		macro_flags = 0;
-swallow_ws_and_lbs:
-		ret = tokenizer_skip_chars(t, " \t", &ws_count);
-		if(!ret) return ret;
-		if(tokenizer_peek(t) == '\\') {
-			x_tokenizer_next(t, &curr);
-			if(-1 == expect(t, TT_SEP, (const char*[]){"\n", 0}, &curr)) {
-err_lf:
-				error("expected \\n", t, &curr);
-				return 0;
-			}
-			goto swallow_ws_and_lbs;
-		}
+		unsigned expected = 0;
 		while(1) {
-			ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
-			if(!ret) return ret;
-swallow_ws_and_lbs_2:
-			if(is_char(&curr, '\\')) {
-				if(-1 == expect(t, TT_SEP, (const char*[]){"\n", 0}, &curr))
-					goto err_lf;
-				if(!skip_next_and_ws(t, &curr)) return 0;
-				goto swallow_ws_and_lbs_2;
-
+			/* process next function argument identifier */
+			ret = consume_nl_and_ws(t, &curr, expected);
+			if(!ret) {
+				error("unexpected", t, &curr);
+				return ret;
 			}
-			/* function like macro with 0 args */
-			if(is_char(&curr, ')') && !new.num_args) goto swallow_trailing_ws;
-			if(curr.type != TT_IDENTIFIER) {
+			expected = 0;
+			if(curr.type == TT_SEP) {
+				switch(curr.value) {
+				case '\\':
+					expected = '\n';
+					continue;
+				case ',':
+					continue;
+				case ')':
+					ret = tokenizer_skip_chars(t, " \t", &ws_count);
+					if(!ret) return ret;
+					goto break_loop1;
+				default:
+					error("unexpected character", t, &curr);
+					return 0;
+				}
+			} else if(curr.type != TT_IDENTIFIER) {
 				error("expected identifier for macro arg", t, &curr);
 				return 0;
 			}
@@ -309,25 +331,6 @@ swallow_ws_and_lbs_2:
 				List_add(&new.argnames, &tmps);
 			}
 			++new.num_args;
-			ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
-			if(!ret) return ret;
-			if(curr.type != TT_SEP) {
-				error("expected ) or ,", t, &curr);
-				return 0;
-			}
-			switch(curr.value) {
-				case ')':
-				case ',':
-swallow_trailing_ws:
-					ret = tokenizer_skip_chars(t, " \t", &ws_count);
-					if(!ret) return ret;
-					if(curr.value == ')')
-						goto break_loop1;
-					break;
-				default:
-					error("unexpected character", t, &curr);
-					return 0;
-			}
 		}
 		break_loop1:;
 	} else if(is_whitespace_token(&curr)) {
