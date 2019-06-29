@@ -588,10 +588,9 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					if(tok.type == TT_EOF) break;
 					emit_token(output, &tok, argvalues[arg_nr].t.buf);
 				}
-				if(hash_count == 1) {
+				if(hash_count == 1)
 					emit(output, "\"");
-					hash_count = 0;
-				}
+				hash_count = 0;
 			} else {
 				if(hash_count == 1) {
 		hash_err:
@@ -601,33 +600,37 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 				emit_token(output, &tok, t2.buf);
 			}
 		} else if(is_char(&tok, '#')) {
-			++hash_count;
+			if(hash_count) {
+				goto hash_err;
+			}
+			while(1) {
+				++hash_count;
+				/* in a real cpp we'd need to look for '\\' first */
+				while(tokenizer_peek(&t2) == '\n') {
+					x_tokenizer_next(&t2, &tok);
+				}
+				if(tokenizer_peek(&t2) == '#') x_tokenizer_next(&t2, &tok);
+				else break;
+			}
+			if(hash_count == 1) flush_whitespace(output, &ws_count);
+			else if(hash_count > 2) {
+				error("only two '#' characters allowed for macro expansion", &t2, &tok);
+				return 0;
+			}
+			if(hash_count == 2)
+				ret = tokenizer_skip_chars(&t2, " \t\n", &ws_count);
+			else
+				ret = tokenizer_skip_chars(&t2, " \t", &ws_count);
+
+			if(!ret) return ret;
+			ws_count = 0;
+
 		} else if(is_whitespace_token(&tok)) {
 			ws_count++;
 		} else {
 			if(hash_count == 1) goto hash_err;
 			flush_whitespace(output, &ws_count);
 			emit_token(output, &tok, t2.buf);
-		}
-		if(hash_count > 2) {
-err_hash_3:
-			error("only two '#' characters allowed for macro expansion", &t2, &tok);
-			return 0;
-		}
-		/* handle token concatention operator ## by emitting whitespace before/after*/
-		if(!is_whitespace_token(&tok) && !ws_count) {
-			flush_whitespace(output, &ws_count);
-		} else if(ws_count && hash_count == 2) {
-glue_eat_ws:
-			if(tokenizer_peek(&t2) == '#') goto err_hash_3;
-			ret = tokenizer_skip_chars(&t2, " \t", &ws_count);
-			if(!ret) return ret;
-			if(tokenizer_peek(&t2) == '\n') {
-				x_tokenizer_next(&t2, &tok);
-				goto glue_eat_ws;
-			}
-			ws_count = 0;
-			hash_count = 0;
 		}
 	}
 	flush_whitespace(output, &ws_count);
