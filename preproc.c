@@ -551,13 +551,8 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	if(!m->str_contents) goto cleanup;
 
 	struct FILE_container cwae = {0}; /* contents_with_args_expanded */
-	FILE* output = out;
-	int expand_now = 1;
-	if(m->num_args) {
-		cwae.f = open_memstream(&cwae.buf, &cwae.len);
-		output = cwae.f;
-		expand_now = 0;
-	}
+	cwae.f = open_memstream(&cwae.buf, &cwae.len);
+	FILE* output = cwae.f;
 
 	struct tokenizer t2;
 	tokenizer_from_file(&t2, m->str_contents);
@@ -583,11 +578,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
 					if(!ret) return ret;
 					if(tok.type == TT_EOF) break;
-					if(expand_now && tok.type == TT_IDENTIFIER) {
-						if(!expand_macro(&argvalues[arg_nr].t, output, argvalues[arg_nr].t.buf, rec_level+1))
-							return 0;
-					} else
-						emit_token(output, &tok, argvalues[arg_nr].t.buf);
+					emit_token(output, &tok, argvalues[arg_nr].t.buf);
 				}
 				if(hash_count == 1) {
 					struct token fake = {
@@ -603,11 +594,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					error("'#' is not followed by macro parameter", &t2, &tok);
 					return 0;
 				}
-				if(expand_now) {
-					if(!expand_macro(&t2, output, t2.buf, rec_level+1))
-						return 0;
-				} else
-					emit_token(output, &tok, t2.buf);
+				emit_token(output, &tok, t2.buf);
 			}
 		} else if(is_char(&tok, '#')) {
 			++hash_count;
@@ -642,7 +629,7 @@ glue_eat_ws:
 	flush_whitespace(output, &ws_count);
 
 	/* we need to expand macros after the macro arguments have been inserted */
-	if(m->num_args) {
+	if(1) {
 		cwae.f = freopen_r(cwae.f, &cwae.buf, &cwae.len);
 #ifdef DEBUG
 		dprintf(2, "contents with args expanded: %s\n", cwae.buf);
@@ -712,9 +699,10 @@ glue_eat_ws:
 			if(tok.type == TT_EOF) break;
 			emit_token(out, &tok, cwae.t.buf);
 		}
-		free_file_container(&cwae);
 		free(mcs);
 	}
+
+	free_file_container(&cwae);
 
 cleanup:
 	for(i=0; i < m->num_args; i++) {
