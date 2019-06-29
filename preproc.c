@@ -579,13 +579,8 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 			flush_whitespace(output, &ws_count);
 			size_t arg_nr = macro_arglist_pos(m, t2.buf), j;
 			if(arg_nr != (size_t) -1) {
-				if(hash_count == 1) {
-					struct token fake = {
-						.type = TT_SEP,
-						.value = '"'
-					};
-					emit_token(output, &fake, argvalues[arg_nr].t.buf);
-				}
+				if(hash_count == 1)
+					emit(output, "\"");
 				tokenizer_rewind(&argvalues[arg_nr].t);
 				while(1) {
 					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
@@ -594,11 +589,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					emit_token(output, &tok, argvalues[arg_nr].t.buf);
 				}
 				if(hash_count == 1) {
-					struct token fake = {
-						.type = TT_SEP,
-						.value = '"'
-					};
-					emit_token(output, &fake, argvalues[arg_nr].t.buf);
+					emit(output, "\"");
 					hash_count = 0;
 				}
 			} else {
