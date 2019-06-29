@@ -10,6 +10,9 @@ struct token_str_tup {
 	const char *strbuf;
 };
 
+#define MACRO_FLAG_OBJECTLIKE 1U<<31
+#define MACRO_ARGCOUNT_MASK ~(0|(MACRO_FLAG_OBJECTLIKE))
+
 struct macro {
 	unsigned num_args;
 	FILE* str_contents;
@@ -264,12 +267,14 @@ static int parse_macro(struct tokenizer *t) {
 	}
 
 	struct macro new = { 0 };
+	unsigned macro_flags = MACRO_FLAG_OBJECTLIKE;
 	List_init(&new.argnames, sizeof(char*));
 
 	ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 	if(!ret) return ret;
 
 	if (is_char(&curr, '(')) {
+		macro_flags = 0;
 swallow_ws_and_lbs:
 		ret = tokenizer_skip_chars(t, " \t", &ws_count);
 		if(!ret) return ret;
@@ -293,6 +298,8 @@ swallow_ws_and_lbs_2:
 				goto swallow_ws_and_lbs_2;
 
 			}
+			/* function like macro with 0 args */
+			if(is_char(&curr, ')') && !new.num_args) goto swallow_trailing_ws;
 			if(curr.type != TT_IDENTIFIER) {
 				error("expected identifier for macro arg", t, &curr);
 				return 0;
@@ -311,6 +318,7 @@ swallow_ws_and_lbs_2:
 			switch(curr.value) {
 				case ')':
 				case ',':
+swallow_trailing_ws:
 					ret = tokenizer_skip_chars(t, " \t", &ws_count);
 					if(!ret) return ret;
 					if(curr.value == ')')
@@ -357,6 +365,7 @@ swallow_ws_and_lbs_2:
 	new.str_contents = freopen_r(contents.f, &contents.buf, &contents.len);
 	new.str_contents_buf = contents.buf;
 done:
+	new.num_args |= macro_flags;
 	add_macro(macroname, &new);
 	return 1;
 }
@@ -393,7 +402,7 @@ unsigned get_macro_info(struct tokenizer *t,
 		struct macro* m = 0;
 		if(tok.type == TT_IDENTIFIER && (m = get_macro(t->buf))) {
 			const char* newname = strdup(t->buf);
-			if(m->num_args > 0) {
+			if(!(m->num_args & MACRO_FLAG_OBJECTLIKE)) {
 				if(tokenizer_peek(t) == '(') {
 					unsigned tpos_save = tpos;
 					tpos = get_macro_info(t, mi_list, mi_cnt, nest+1, tpos+1, newname);
@@ -488,13 +497,14 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 
 	size_t i;
 	struct token tok;
-	struct FILE_container *argvalues = calloc(m->num_args, sizeof(struct FILE_container));
+	unsigned num_args = m->num_args & MACRO_ARGCOUNT_MASK;
+	struct FILE_container *argvalues = calloc(num_args, sizeof(struct FILE_container));
 
-	for(i=0; i < m->num_args; i++)
+	for(i=0; i < num_args; i++)
 		argvalues[i].f = open_memstream(&argvalues[i].buf, &argvalues[i].len);
 
 	/* replace named arguments in the contents of the macro call */
-	if(m->num_args) {
+	if(!(m->num_args & MACRO_FLAG_OBJECTLIKE)) {
 		if(expect(t, TT_SEP, (const char*[]){"(", 0}, &tok) != 0) {
 			error("expected (", t, &tok);
 			return 0;
@@ -516,7 +526,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 				}
 				need_arg = 1;
 				curr_arg++;
-				if(curr_arg >= m->num_args) {
+				if(curr_arg >= num_args) {
 					error("too many arguments for function macro", t, &tok);
 					return 0;
 				}
@@ -527,7 +537,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 				++parens;
 			} else if(is_char(&tok, ')')) {
 				if(!parens) {
-					if(curr_arg != m->num_args-1) {
+					if(curr_arg + num_args && curr_arg != num_args-1) {
 						error("too few args for function macro", t, &tok);
 						return 0;
 					}
@@ -540,7 +550,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		}
 	}
 
-	for(i=0; i < m->num_args; i++) {
+	for(i=0; i < num_args; i++) {
 		argvalues[i].f = freopen_r(argvalues[i].f, &argvalues[i].buf, &argvalues[i].len);
 		tokenizer_from_file(&argvalues[i].t, argvalues[i].f);
 #ifdef DEBUG
@@ -705,7 +715,7 @@ glue_eat_ws:
 	free_file_container(&cwae);
 
 cleanup:
-	for(i=0; i < m->num_args; i++) {
+	for(i=0; i < num_args; i++) {
 		fclose(argvalues[i].f);
 		free(argvalues[i].buf);
 	}
