@@ -35,6 +35,11 @@ static int tokenizer_getc(struct tokenizer *t)
 	return c;
 }
 
+int tokenizer_peek(struct tokenizer *t) {
+	int ret = tokenizer_getc(t);
+	if(ret != EOF) tokenizer_ungetc(t, ret);
+	return ret;
+}
 const char* tokentype_to_str(enum tokentype tt) {
 	switch(tt) {
 		case TT_IDENTIFIER: return "iden";
@@ -359,3 +364,10 @@ void tokenizer_register_marker(struct tokenizer *t, enum markertype mt, const ch
 	t->marker[mt] = marker;
 }
 
+int tokenizer_rewind(struct tokenizer *t) {
+	FILE *f = t->input;
+	int flags = t->flags;
+	const char* fn = t->filename;
+	*t = (struct tokenizer){.input = f, .flags = flags, .filename = fn};
+	return fseek(f, 0, SEEK_SET) == 0;
+}

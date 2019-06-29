@@ -65,9 +65,11 @@ void tokenizer_set_filename(struct tokenizer *t, const char*);
 void tokenizer_set_flags(struct tokenizer *t, int flags);
 void tokenizer_register_marker(struct tokenizer*, enum markertype, const char*);
 int tokenizer_next(struct tokenizer *t, struct token* out);
+int tokenizer_peek(struct tokenizer *t);
 void tokenizer_skip_until(struct tokenizer *t, const char *marker);
 int tokenizer_skip_chars(struct tokenizer *t, const char *chars, int *count);
 int tokenizer_read_until(struct tokenizer *t, const char* marker, int stop_at_nl);
+int tokenizer_rewind(struct tokenizer *t);
 
 #pragma RcB2 DEP "tokenizer.c"
 
