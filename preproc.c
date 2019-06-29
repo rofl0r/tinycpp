@@ -35,6 +35,7 @@ static int token_needs_string(struct token *tok) {
 static void tokenizer_from_file(struct tokenizer *t, FILE* f) {
 	tokenizer_init(t, f, TF_PARSE_STRINGS);
 	tokenizer_set_filename(t, "<macro>");
+	tokenizer_rewind(t);
 }
 
 /* iobuf needs to point to a char[2], which will be used for a character token.
@@ -361,8 +362,8 @@ struct macro_info {
 };
 
 unsigned get_macro_info(struct tokenizer *t,
-		struct macro_info *mi_list, size_t *mi_cnt,
-		unsigned nest, unsigned tpos, const char *name) {
+	struct macro_info *mi_list, size_t *mi_cnt,
+	unsigned nest, unsigned tpos, const char *name) {
 	unsigned brace_lvl = 0;
 	while(1) {
 		struct token tok;
@@ -375,14 +376,16 @@ unsigned get_macro_info(struct tokenizer *t,
 		if(tok.type == TT_IDENTIFIER && (m = get_macro(t->buf))) {
 			const char* newname = strdup(t->buf);
 			if(m->num_args > 0) {
-				unsigned tpos_save = tpos;
-				tpos = get_macro_info(t, mi_list, mi_cnt, nest+1, tpos+1, newname);
-				mi_list[*mi_cnt] = (struct macro_info) {
-					.name = newname,
-					.nest=nest+1,
-					.first = tpos_save,
-					.last = tpos + 1};
-				++(*mi_cnt);
+				if(tokenizer_peek(t) == '(') {
+					unsigned tpos_save = tpos;
+					tpos = get_macro_info(t, mi_list, mi_cnt, nest+1, tpos+1, newname);
+					mi_list[*mi_cnt] = (struct macro_info) {
+						.name = newname,
+						.nest=nest+1,
+						.first = tpos_save,
+						.last = tpos + 1};
+					++(*mi_cnt);
+				}
 			} else {
 				mi_list[*mi_cnt] = (struct macro_info) {
 					.name = newname,
@@ -422,17 +425,17 @@ static int mem_tokenizers_join(
 	size_t i;
 	struct token tok;
 	int ret;
-	fseek(org->f, 0, SEEK_SET);
+	tokenizer_rewind(&org->t);
 	for(i=0; i<first; ++i) {
 		ret = tokenizer_next(&org->t, &tok);
-		assert(!ret && tok.type != TT_EOF);
-		emit_token(result->f, &tok, org->buf);
+		assert(ret && tok.type != TT_EOF);
+		emit_token(result->f, &tok, org->t.buf);
 	}
 	int cnt = 0;
 	while(1) {
 		ret = tokenizer_next(&inj->t, &tok);
 		if(!ret || tok.type == TT_EOF) break;
-		emit_token(result->f, &tok, inj->buf);
+		emit_token(result->f, &tok, inj->t.buf);
 		++cnt;
 	}
 	int diff = cnt - ((int) last - (int) first);
@@ -441,7 +444,7 @@ static int mem_tokenizers_join(
 	while(1) {
 		ret = tokenizer_next(&org->t, &tok);
 		if(!ret || tok.type == TT_EOF) break;
-		emit_token(result->f, &tok, org->buf);
+		emit_token(result->f, &tok, org->t.buf);
 	}
 	result->f = freopen_r(result->f, &result->buf, &result->len);
 	tokenizer_from_file(&result->t, result->f);
@@ -540,7 +543,6 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 
 	struct tokenizer t2;
 	tokenizer_from_file(&t2, m->str_contents);
-	fseek(m->str_contents, 0, SEEK_SET);
 	int hash_count = 0;
 	int ws_count = 0;
 	while(1) {
@@ -558,7 +560,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					};
 					emit_token(output, &fake, argvalues[arg_nr].t.buf);
 				}
-				fseek(argvalues[arg_nr].f, 0, SEEK_SET);
+				tokenizer_rewind(&argvalues[arg_nr].t);
 				while(1) {
 					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
 					if(!ret) return ret;
@@ -628,77 +630,56 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 				++mac_cnt;
 		}
 
-		fseek(cwae.f, 0, SEEK_SET);
+		tokenizer_rewind(&cwae.t);
 		struct macro_info *mcs = calloc(mac_cnt, sizeof(struct macro_info));
 		{
 			size_t mac_iter = 0;
 			get_macro_info(&cwae.t, mcs, &mac_iter, 0, 0, "null");
+			/* some of the macros might not expand at this stage (without braces)*/
+			while(mac_cnt && mcs[mac_cnt-1].name == 0)
+				--mac_cnt;
 		}
 		size_t i; int depth = 0;
 		for(i = 0; i < mac_cnt; ++i) {
 			if(mcs[i].nest > depth) depth = mcs[i].nest;
 		}
-		struct filecont_and_mi {
-			struct FILE_container fc;
-			size_t mi;
-		} *expanded = calloc(mac_cnt, sizeof(struct filecont_and_mi));
-		size_t mi = 0;
 		while(depth > -1) {
 			for(i = 0; i < mac_cnt; ++i) if(mcs[i].nest == depth) {
-				fseek(cwae.f, 0, SEEK_SET);
+				struct macro_info *mi = &mcs[i];
+				tokenizer_rewind(&cwae.t);
 				size_t j;
 				struct token utok;
-				for(j = 0; j < mcs[i].first+1; ++j)
+				for(j = 0; j < mi->first+1; ++j)
 					tokenizer_next(&cwae.t, &utok);
-				expanded[mi].mi = i;
-				expanded[mi].fc.f = open_memstream(&expanded[mi].fc.buf, &expanded[mi].fc.len);
-				if(!expand_macro(&cwae.t, expanded[mi].fc.f, mcs[i].name, rec_level+1))
+				struct FILE_container t2 = {0}, tmp = {0};
+				t2.f = open_memstream(&t2.buf, &t2.len);
+				if(!expand_macro(&cwae.t, t2.f, mi->name, rec_level+1))
 					return 0;
-				expanded[mi].fc.f = freopen_r(expanded[mi].fc.f, &expanded[mi].fc.buf, &expanded[mi].fc.len);
-				tokenizer_from_file(&expanded[mi].fc.t, expanded[mi].fc.f);
-				mi++;
-			}
-			--depth;
-		}
-#ifdef DEBUG
-		for(i = 0; i < mac_cnt; ++i) {
-			dprintf(2, "exp %s (%s)\n", mcs[expanded[i].mi].name, expanded[i].fc.buf);
-		}
-#endif
-		fseek(cwae.f, 0, SEEK_SET);
-		size_t curr_exp = 0;
-		while(curr_exp < mac_cnt) {
-			struct macro_info *mi = &mcs[expanded[curr_exp].mi];
-			struct FILE_container *t2 = &expanded[curr_exp].fc;
-			struct FILE_container tmp = {0};
-			int diff = mem_tokenizers_join(&cwae, t2, &tmp, mi->first, mi->last);
-			free_file_container(&cwae);
-			cwae = tmp;
-			if(diff != 0) {
-				size_t exp2s = curr_exp + 1;
-				while(exp2s < mac_cnt) {
-					struct macro_info *mi2 = &mcs[expanded[exp2s].mi];
-					struct FILE_container *t3 = &expanded[exp2s].fc;
+				t2.f = freopen_r(t2.f, &t2.buf, &t2.len);
+				tokenizer_from_file(&t2.t, t2.f);
+				tokenizer_rewind(&cwae.t);
+				int diff = mem_tokenizers_join(&cwae, &t2, &tmp, mi->first, mi->last);
+				free_file_container(&cwae);
+				cwae = tmp;
+				if(diff == 0) continue;
+				for(j = 0; j < mac_cnt; ++j) {
+					if(j == i) continue;
+					struct macro_info *mi2 = &mcs[j];
 					/* modified element mi can be either inside, after or before
 					   another macro. the after case doesn't affect us. */
 					if(mi->first >= mi2->first && mi->last <= mi2->last) {
 						/* inside m2 */
-						unsigned start = mi->first - mi2->first;
-						mem_tokenizers_join(t3, t2, &tmp, start, start+(mi->last - mi->first));
-						free_file_container(t3);
-						*t3 = tmp;
 						mi2->last += diff;
 					} else if (mi->first < mi2->first) {
 						/* before m2 */
 						mi2->first += diff;
 						mi2->last += diff;
 					}
-					++exp2s;
 				}
 			}
-			++curr_exp;
+			--depth;
 		}
-		fseek(cwae.f, 0, SEEK_SET);
+		tokenizer_rewind(&cwae.t);
 		while(1) {
 			int ret = x_tokenizer_next(&cwae.t, &tok);
 			if(!ret) return ret;
@@ -707,7 +688,6 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		}
 		free_file_container(&cwae);
 		free(mcs);
-		free(expanded);
 	}
 
 cleanup:
