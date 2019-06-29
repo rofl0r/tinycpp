@@ -119,6 +119,12 @@ static int x_tokenizer_next(struct tokenizer *t, struct token *tok) {
 	return ret;
 }
 
+static int is_whitespace_token(struct token *token)
+{
+	return token->type == TT_SEP &&
+		(token->value == ' ' || token->value == '\t');
+}
+
 /* return index of matching item in values array, or -1 on error */
 static int expect(struct tokenizer *t, enum tokentype tt, const char* values[], struct token *token)
 {
@@ -126,7 +132,7 @@ static int expect(struct tokenizer *t, enum tokentype tt, const char* values[], 
 	do {
 		ret = tokenizer_next(t, token);
 		if(ret == 0 || token->type == TT_EOF) goto err;
-	} while(token->type == TT_SEP && isspace(token->value));
+	} while(is_whitespace_token(token));
 
 	if(token->type != tt) {
 err:
@@ -144,12 +150,6 @@ err:
 
 static int is_char(struct token *tok, int ch) {
 	return tok->type == TT_SEP && tok->value == ch;
-}
-
-static int is_whitespace_token(struct token *token)
-{
-	return token->type == TT_SEP &&
-		(token->value == ' ' || token->value == '\t');
 }
 
 static void flush_whitespace(FILE *out, int *ws_count) {
@@ -270,11 +270,29 @@ static int parse_macro(struct tokenizer *t) {
 	if(!ret) return ret;
 
 	if (is_char(&curr, '(')) {
+swallow_ws_and_lbs:
 		ret = tokenizer_skip_chars(t, " \t", &ws_count);
 		if(!ret) return ret;
+		if(tokenizer_peek(t) == '\\') {
+			x_tokenizer_next(t, &curr);
+			if(-1 == expect(t, TT_SEP, (const char*[]){"\n", 0}, &curr)) {
+err_lf:
+				error("expected \\n", t, &curr);
+				return 0;
+			}
+			goto swallow_ws_and_lbs;
+		}
 		while(1) {
 			ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 			if(!ret) return ret;
+swallow_ws_and_lbs_2:
+			if(is_char(&curr, '\\')) {
+				if(-1 == expect(t, TT_SEP, (const char*[]){"\n", 0}, &curr))
+					goto err_lf;
+				if(!skip_next_and_ws(t, &curr)) return 0;
+				goto swallow_ws_and_lbs_2;
+
+			}
 			if(curr.type != TT_IDENTIFIER) {
 				error("expected identifier for macro arg", t, &curr);
 				return 0;
@@ -601,6 +619,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 			emit_token(output, &tok, t2.buf);
 		}
 		if(hash_count > 2) {
+err_hash_3:
 			error("only two '#' characters allowed for macro expansion", &t2, &tok);
 			return 0;
 		}
@@ -608,9 +627,16 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		if(!is_whitespace_token(&tok) && !ws_count) {
 			flush_whitespace(output, &ws_count);
 		} else if(ws_count && hash_count == 2) {
+glue_eat_ws:
+			if(tokenizer_peek(&t2) == '#') goto err_hash_3;
 			ret = tokenizer_skip_chars(&t2, " \t", &ws_count);
 			if(!ret) return ret;
+			if(tokenizer_peek(&t2) == '\n') {
+				x_tokenizer_next(&t2, &tok);
+				goto glue_eat_ws;
+			}
 			ws_count = 0;
+			hash_count = 0;
 		}
 	}
 	flush_whitespace(output, &ws_count);
