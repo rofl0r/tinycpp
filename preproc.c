@@ -391,9 +391,19 @@ struct macro_info {
 	unsigned last;
 };
 
+static int was_visited(const char *name, char*visited[], unsigned rec_level) {
+	int x;
+	for(x = rec_level; x >= 0; --x) {
+		if(!strcmp(visited[x], name)) return 1;
+	}
+	return 0;
+}
+
 unsigned get_macro_info(struct tokenizer *t,
 	struct macro_info *mi_list, size_t *mi_cnt,
-	unsigned nest, unsigned tpos, const char *name) {
+	unsigned nest, unsigned tpos, const char *name,
+	char* visited[], unsigned rec_level
+	) {
 	unsigned brace_lvl = 0;
 	while(1) {
 		struct token tok;
@@ -403,12 +413,12 @@ unsigned get_macro_info(struct tokenizer *t,
 		dprintf(2, "(%s) nest %d, brace %zu t: %s\n", name, nest, brace_lvl, t->buf);
 #endif
 		struct macro* m = 0;
-		if(tok.type == TT_IDENTIFIER && (m = get_macro(t->buf))) {
+		if(tok.type == TT_IDENTIFIER && (m = get_macro(t->buf)) && !was_visited(t->buf, visited, rec_level)) {
 			const char* newname = strdup(t->buf);
 			if(!(m->num_args & MACRO_FLAG_OBJECTLIKE)) {
 				if(tokenizer_peek(t) == '(') {
 					unsigned tpos_save = tpos;
-					tpos = get_macro_info(t, mi_list, mi_cnt, nest+1, tpos+1, newname);
+					tpos = get_macro_info(t, mi_list, mi_cnt, nest+1, tpos+1, newname, visited, rec_level);
 					mi_list[*mi_cnt] = (struct macro_info) {
 						.name = newname,
 						.nest=nest+1,
@@ -490,13 +500,18 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		emit(out, name);
 		return 1;
 	}
-	if(rec_level > MAX_RECURSION) {
+	if(rec_level >= MAX_RECURSION) {
 		error("max recursion level reached", t, 0);
 		return 0;
 	}
 #ifdef DEBUG
 	dprintf(2, "lvl %u: expanding macro %s (%s)\n", rec_level, name, m->str_contents_buf);
 #endif
+
+	/* FIXME: make this a parameter */
+	static char* visited[MAX_RECURSION] = {0};
+	if(visited[rec_level]) free(visited[rec_level]);
+	visited[rec_level] = strdup(name);
 
 	size_t i;
 	struct token tok;
@@ -654,7 +669,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		struct macro_info *mcs = calloc(mac_cnt, sizeof(struct macro_info));
 		{
 			size_t mac_iter = 0;
-			get_macro_info(&cwae.t, mcs, &mac_iter, 0, 0, "null");
+			get_macro_info(&cwae.t, mcs, &mac_iter, 0, 0, "null", visited, rec_level);
 			/* some of the macros might not expand at this stage (without braces)*/
 			while(mac_cnt && mcs[mac_cnt-1].name == 0)
 				--mac_cnt;
