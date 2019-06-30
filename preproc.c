@@ -495,7 +495,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		return 0;
 	}
 #ifdef DEBUG
-	dprintf(2, "expanding macro %s (%s)\n", name, m->str_contents_buf);
+	dprintf(2, "lvl %u: expanding macro %s (%s)\n", rec_level, name, m->str_contents_buf);
 #endif
 
 	size_t i;
