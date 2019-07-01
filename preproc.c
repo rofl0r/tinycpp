@@ -79,6 +79,13 @@ static int undef_macro(const char *name) {
 	return 1;
 }
 
+static void add_defined_macro(void) {
+	struct macro m = {
+		.num_args = 1,
+	};
+	add_macro("defined", &m);
+}
+
 static void error_or_warning(const char *err, const char* type, struct tokenizer *t, struct token *curr) {
 	unsigned column = curr ? curr->column : t->column;
 	unsigned line  = curr ? curr->line : t->line;
@@ -270,6 +277,11 @@ static int parse_macro(struct tokenizer *t) {
 	dprintf(2, "parsing macro %s\n", macroname);
 #endif
 	if(get_macro(macroname)) {
+		if(!strcmp(macroname, "defined")) {
+			error("\"defined\" cannot be used as a macro name", t, &curr);
+			return 0;
+		}
+
 		char buf[128];
 		sprintf(buf, "redefinition of macro %s", macroname);
 		warning(buf, t, 0);
@@ -480,12 +492,21 @@ static int mem_tokenizers_join(
 
 #define MAX_RECURSION 32
 
+/* rec_level -1 serves as a magic value to signal we're using
+   expand_macro from the if-evaluator code, which means activating
+   the "define" macro */
 static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level) {
-	struct macro *m = get_macro(name);
+	int is_define = !strcmp(name, "defined");
+
+	struct macro *m;
+	if(is_define && rec_level != -1)
+		m = NULL;
+	else m = get_macro(name);
 	if(!m) {
 		emit(out, name);
 		return 1;
 	}
+	if(rec_level == -1) rec_level = 0;
 	if(rec_level >= MAX_RECURSION) {
 		error("max recursion level reached", t, 0);
 		return 0;
@@ -560,6 +581,13 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 #ifdef DEBUG
 		dprintf(2, "macro argument %i: %s\n", (int) i, argvalues[i].buf);
 #endif
+	}
+
+	if(is_define) {
+		if(get_macro(argvalues[0].buf))
+			emit(out, "1");
+		else
+			emit(out, "0");
 	}
 
 	if(!m->str_contents) goto cleanup;
@@ -753,7 +781,7 @@ static int evaluate_condition(struct tokenizer *t, int *result) {
 		ret = tokenizer_next(t, &curr);
 		if(!ret) return ret;
 		if(curr.type == TT_IDENTIFIER) {
-			if(!expand_macro(t, f, t->buf, 0)) return 0;
+			if(!expand_macro(t, f, t->buf, -1)) return 0;
 		} else if(curr.type == TT_SEP) {
 			if(curr.value == '\\')
 				backslash_seen = 1;
@@ -931,6 +959,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 
 int preprocessor_run(FILE* in, const char* inname, FILE* out) {
 	macros = kh_init(macros);
+	add_defined_macro();
 	return parse_file(in, inname, out);
 }
 
