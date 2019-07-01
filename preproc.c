@@ -41,20 +41,6 @@ static void tokenizer_from_file(struct tokenizer *t, FILE* f) {
 	tokenizer_rewind(t);
 }
 
-/* iobuf needs to point to a char[2], which will be used for a character token.
-   after success, it'll point to either the original buffer, or the tokenizer's
- */
-static size_t token_as_string(struct tokenizer *t, struct token *tok, char** iobuf) {
-	if(token_needs_string(tok)) {
-		*iobuf = t->buf;
-		return strlen(t->buf);
-	} else {
-		iobuf[0][0] = tok->value;
-		iobuf[0][1] = 0;
-		return 1;
-	}
-}
-
 KHASH_MAP_INIT_STR(macros, struct macro)
 
 static khash_t(macros) *macros;
