@@ -20,11 +20,15 @@ enum markertype {
 	MT_MAX = MT_MULTILINE_COMMENT_END
 };
 
+#define MAX_CUSTOM_TOKENS 32
+
 struct tokenizer {
 	FILE *input;
 	uint32_t line;
 	uint32_t column;
 	int flags;
+	int custom_count;
+	const char *custom_tokens[MAX_CUSTOM_TOKENS];
 	char buf[MAX_TOK_LEN];
 	struct tokenizer_getc_buf getc_buf;
 	const char* marker[MT_MAX+1];
@@ -64,6 +68,7 @@ void tokenizer_init(struct tokenizer *t, FILE* in, int flags);
 void tokenizer_set_filename(struct tokenizer *t, const char*);
 void tokenizer_set_flags(struct tokenizer *t, int flags);
 void tokenizer_register_marker(struct tokenizer*, enum markertype, const char*);
+void tokenizer_register_custom_token(struct tokenizer*, int tokentype, const char*);
 int tokenizer_next(struct tokenizer *t, struct token* out);
 int tokenizer_peek(struct tokenizer *t);
 void tokenizer_skip_until(struct tokenizer *t, const char *marker);

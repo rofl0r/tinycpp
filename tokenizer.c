@@ -40,6 +40,14 @@ int tokenizer_peek(struct tokenizer *t) {
 	if(ret != EOF) tokenizer_ungetc(t, ret);
 	return ret;
 }
+
+void tokenizer_register_custom_token(struct tokenizer*t, int tokentype, const char* str) {
+	assert(tokentype >= TT_CUSTOM && tokentype < TT_CUSTOM + MAX_CUSTOM_TOKENS);
+	int pos = tokentype - TT_CUSTOM;
+	t->custom_tokens[pos] = str;
+	if(pos+1 > t->custom_count) t->custom_count = pos+1;
+}
+
 const char* tokentype_to_str(enum tokentype tt) {
 	switch(tt) {
 		case TT_IDENTIFIER: return "iden";
@@ -204,6 +212,7 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out) {
 	return apply_coords(t, out, s, 0);
 }
 
+/* if sequence found, next tokenizer call will point after the sequence */
 static int sequence_follows(struct tokenizer *t, int c, const char *which)
 {
 	if(!which || !which[0]) return 0;
@@ -330,6 +339,22 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 		}
 
 		c = tokenizer_getc(t);
+
+		{
+			int i;
+			for(i = 0; i < t->custom_count; i++)
+				if(sequence_follows(t, c, t->custom_tokens[i])) {
+					char *p = t->custom_tokens[i];
+					while(*p) {
+						s = assign_bufchar(t, s, *p);
+						p++;
+					}
+					*s = 0;
+					out->type = TT_CUSTOM + i;
+					return apply_coords(t, out, s, 1);
+				}
+		}
+
 		s = assign_bufchar(t, s, c);
 		*s = 0;
 		//s = assign_bufchar(t, s, 0);
