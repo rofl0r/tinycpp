@@ -36,8 +36,16 @@ static int tokenizer_getc(struct tokenizer *t)
 }
 
 int tokenizer_peek(struct tokenizer *t) {
+	if(t->peeking) return t->peek_token.value;
 	int ret = tokenizer_getc(t);
 	if(ret != EOF) tokenizer_ungetc(t, ret);
+	return ret;
+}
+
+int tokenizer_peek_token(struct tokenizer *t, struct token *tok) {
+	int ret = tokenizer_next(t, tok);
+	t->peek_token = *tok;
+	t->peeking = 1;
 	return ret;
 }
 
@@ -230,6 +238,7 @@ static int sequence_follows(struct tokenizer *t, int c, const char *which)
 }
 
 int tokenizer_skip_chars(struct tokenizer *t, const char *chars, int *count) {
+	assert(!t->peeking);
 	int c;
 	*count = 0;
 	while(1) {
@@ -308,6 +317,11 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 	char *s = t->buf;
 	out->value = 0;
 	int c = 0;
+	if(t->peeking) {
+		*out = t->peek_token;
+		t->peeking = 0;
+		return 1;
+	}
 	while(1) {
 		c = tokenizer_getc(t);
 		if(c == EOF) break;
