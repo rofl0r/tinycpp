@@ -749,19 +749,178 @@ cleanup:
 	return 1;
 }
 
-/* FIXME: at the moment we only evaluate the first decimal number */
-static int do_eval(struct tokenizer *t, int *result) {
-	*result = 0;
-	struct token curr;
-	while(1) {
-		int ret = tokenizer_next(t, &curr);
-		if(!ret) return ret;
-		if(curr.type == TT_EOF) break;
-		if(curr.type == TT_DEC_INT_LIT) {
-			*result = atoi(t->buf);
-			break;
+#define TT_LAND TT_CUSTOM+0
+#define TT_LOR TT_CUSTOM+1
+#define TT_LTE TT_CUSTOM+2
+#define TT_GTE TT_CUSTOM+3
+#define TT_SHL TT_CUSTOM+4
+#define TT_SHR TT_CUSTOM+5
+#define TT_EQ TT_CUSTOM+6
+#define TT_NEQ TT_CUSTOM+7
+#define TT_LT TT_CUSTOM+8
+#define TT_GT TT_CUSTOM+9
+#define TT_BAND TT_CUSTOM+10
+#define TT_BOR TT_CUSTOM+11
+#define TT_XOR TT_CUSTOM+12
+#define TT_NEG TT_CUSTOM+13
+#define TT_PLUS TT_CUSTOM+14
+#define TT_MINUS TT_CUSTOM+15
+#define TT_MUL TT_CUSTOM+16
+#define TT_DIV TT_CUSTOM+17
+#define TT_MOD TT_CUSTOM+18
+#define TT_LPAREN TT_CUSTOM+19
+#define TT_RPAREN TT_CUSTOM+20
+#define TT_LNOT TT_CUSTOM+21
+
+#define TTINT(X) X-TT_CUSTOM
+#define TTENT(X, Y) [TTINT(X)] = Y
+
+static int bp(int tokentype) {
+	static const int bplist[] = {
+		TTENT(TT_LOR, 1 << 4),
+		TTENT(TT_LAND, 1 << 5),
+		TTENT(TT_BOR, 1 << 6),
+		TTENT(TT_XOR, 1 << 7),
+		TTENT(TT_BAND, 1 << 8),
+		TTENT(TT_EQ, 1 << 9),
+		TTENT(TT_NEQ, 1 << 9),
+		TTENT(TT_LTE, 1 << 10),
+		TTENT(TT_GTE, 1 << 10),
+		TTENT(TT_LT, 1 << 10),
+		TTENT(TT_GT, 1 << 10),
+		TTENT(TT_SHL, 1 << 11),
+		TTENT(TT_SHR, 1 << 11),
+		TTENT(TT_PLUS, 1 << 12),
+		TTENT(TT_MINUS, 1 << 12),
+		TTENT(TT_MUL, 1 << 13),
+		TTENT(TT_DIV, 1 << 13),
+		TTENT(TT_MOD, 1 << 13),
+		TTENT(TT_NEG, 1 << 14),
+		TTENT(TT_LNOT, 1 << 14),
+		TTENT(TT_LPAREN, 1 << 15),
+//		TTENT(TT_RPAREN, 1 << 15),
+//		TTENT(TT_LPAREN, 0),
+		TTENT(TT_RPAREN, 0),
+	};
+	if(TTINT(tokentype) < sizeof(bplist)/sizeof(bplist[0])) return bplist[TTINT(tokentype)];
+	return 0;
+}
+
+static int expr(struct tokenizer *t, int rbp);
+
+static int nud(struct tokenizer *t, struct token *tok) {
+	switch(tok->type) {
+		case TT_IDENTIFIER: return 0;
+		/* case TT_SQSTRING_LIT:  todo convert char into int */
+		case TT_HEX_INT_LIT:
+		case TT_OCT_INT_LIT:
+		case TT_DEC_INT_LIT:
+			return strtol(t->buf, NULL, 0);
+		case TT_NEG:   return ~ expr(t, bp(tok->type));
+		case TT_PLUS:  return expr(t, bp(tok->type));
+		case TT_MINUS: return - expr(t, bp(tok->type));
+		case TT_LNOT:  return !expr(t, bp(tok->type));
+		case TT_LPAREN: {
+			int inner = expr(t, 0);
+			if(0!=expect(t, TT_RPAREN, (const char*[]){")", 0}, tok)) {
+				error("missing ')'", t, tok);
+				return 0;
+			}
+			return inner;
 		}
+		case TT_RPAREN:
+		default:
+			error("unexpected token", t, tok);
+			return 0;
 	}
+}
+
+static int led(struct tokenizer *t, int left, struct token *tok) {
+	switch(tok->type) {
+		case TT_LAND: return left && expr(t, bp(tok->type));
+		case TT_LOR:  return left || expr(t, bp(tok->type));
+		case TT_LTE:  return left <= expr(t, bp(tok->type));
+		case TT_GTE:  return left >= expr(t, bp(tok->type));
+		case TT_SHL:  return left << expr(t, bp(tok->type));
+		case TT_SHR:  return left >> expr(t, bp(tok->type));
+		case TT_EQ:   return left == expr(t, bp(tok->type));
+		case TT_NEQ:  return left != expr(t, bp(tok->type));
+		case TT_LT:   return left <  expr(t, bp(tok->type));
+		case TT_GT:   return left >  expr(t, bp(tok->type));
+		case TT_BAND: return left &  expr(t, bp(tok->type));
+		case TT_BOR:  return left |  expr(t, bp(tok->type));
+		case TT_XOR:  return left ^  expr(t, bp(tok->type));
+		case TT_PLUS: return left +  expr(t, bp(tok->type));
+		case TT_MINUS:return left -  expr(t, bp(tok->type));
+		case TT_MUL:  return left *  expr(t, bp(tok->type));
+		case TT_DIV:  return left /  expr(t, bp(tok->type));
+		case TT_MOD:  return left %  expr(t, bp(tok->type));
+		default:
+			error("eval: unexpect token", t, tok);
+			return 0;
+	}
+}
+
+
+static int tokenizer_peek_next_non_ws(struct tokenizer *t, struct token *tok)
+{
+	int ret;
+	while(1) {
+		ret = tokenizer_peek_token(t, tok);
+		if(is_whitespace_token(tok))
+			x_tokenizer_next(t, tok);
+		else break;
+	}
+	return ret;
+}
+
+static int expr(struct tokenizer *t, int rbp) {
+	struct token tok;
+	int ret = skip_next_and_ws(t, &tok);
+	if(tok.type == TT_EOF) return 0;
+	int left = nud(t, &tok);
+	while(1) {
+		ret = tokenizer_peek_next_non_ws(t, &tok);
+		if(bp(tok.type) <= rbp) break;
+		ret = tokenizer_next(t, &tok);
+		if(tok.type == TT_EOF) break;
+		left = led(t, left, &tok);
+	}
+	return left;
+}
+
+static int do_eval(struct tokenizer *t, int *result) {
+	tokenizer_register_custom_token(t, TT_LAND, "&&");
+	tokenizer_register_custom_token(t, TT_LOR, "||");
+	tokenizer_register_custom_token(t, TT_LTE, "<=");
+	tokenizer_register_custom_token(t, TT_GTE, ">=");
+	tokenizer_register_custom_token(t, TT_SHL, "<<");
+	tokenizer_register_custom_token(t, TT_SHR, ">>");
+	tokenizer_register_custom_token(t, TT_EQ, "==");
+	tokenizer_register_custom_token(t, TT_NEQ, "!=");
+
+	tokenizer_register_custom_token(t, TT_LT, "<");
+	tokenizer_register_custom_token(t, TT_GT, ">");
+
+	tokenizer_register_custom_token(t, TT_BAND, "&");
+	tokenizer_register_custom_token(t, TT_BOR, "|");
+	tokenizer_register_custom_token(t, TT_XOR, "^");
+	tokenizer_register_custom_token(t, TT_NEG, "~");
+
+	tokenizer_register_custom_token(t, TT_PLUS, "+");
+	tokenizer_register_custom_token(t, TT_MINUS, "-");
+	tokenizer_register_custom_token(t, TT_MUL, "*");
+	tokenizer_register_custom_token(t, TT_DIV, "/");
+	tokenizer_register_custom_token(t, TT_MOD, "%");
+
+	tokenizer_register_custom_token(t, TT_LPAREN, "(");
+	tokenizer_register_custom_token(t, TT_RPAREN, ")");
+	tokenizer_register_custom_token(t, TT_LNOT, "!");
+
+	*result = expr(t, 0);
+#ifdef DEBUG
+	dprintf(2, "eval result: %d\n", *result);
+#endif
 	return 1;
 }
 
