@@ -808,10 +808,21 @@ static int bp(int tokentype) {
 
 static int expr(struct tokenizer *t, int rbp);
 
+static int charlit_to_int(const char *lit) {
+	if(lit[1] == '\\') switch(lit[2]) {
+		case 'n': return 10;
+		case 't': return 9;
+		case 'r': return 13;
+		case 'x': return strtol(lit+3, NULL, 16);
+		default: return lit[2];
+	}
+	return lit[1];
+}
+
 static int nud(struct tokenizer *t, struct token *tok) {
 	switch(tok->type) {
 		case TT_IDENTIFIER: return 0;
-		/* case TT_SQSTRING_LIT:  todo convert char into int */
+		case TT_SQSTRING_LIT:  return charlit_to_int(t->buf);
 		case TT_HEX_INT_LIT:
 		case TT_OCT_INT_LIT:
 		case TT_DEC_INT_LIT:
