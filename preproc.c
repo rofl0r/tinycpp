@@ -5,11 +5,6 @@
 #include "../cdev/cdev/agsutils/List.h"
 #include "khash.h"
 
-struct token_str_tup {
-	struct token tok;
-	const char *strbuf;
-};
-
 #define MACRO_FLAG_OBJECTLIKE 1U<<31
 #define MACRO_ARGCOUNT_MASK ~(0|(MACRO_FLAG_OBJECTLIKE))
 
