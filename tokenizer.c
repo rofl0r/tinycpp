@@ -145,15 +145,30 @@ static int is_ellipsis(const char *s) {
 }
 
 static int is_identifier(const char *s) {
-	#define ALPHA_UP "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	#define ALPHA_LO "abcdefghijklmnopqrstuvwxyz"
-	#define DIGIT    "0123456789"
-	static const char iden_head[] = "_" ALPHA_UP ALPHA_LO;
-	static const char iden_tail[] = "_" ALPHA_UP ALPHA_LO DIGIT;
-
-	if(!strchr(iden_head, *(s++))) return 0;
+	static const char ascmap[128] = {
+	['0'] = 2, ['1'] = 2, ['2'] = 2, ['3'] = 2,
+	['4'] = 2, ['5'] = 2, ['6'] = 2, ['7'] = 2,
+	['8'] = 2, ['9'] = 2, ['A'] = 1, ['B'] = 1,
+	['C'] = 1, ['D'] = 1, ['E'] = 1, ['F'] = 1,
+	['G'] = 1, ['H'] = 1, ['I'] = 1, ['J'] = 1,
+	['K'] = 1, ['L'] = 1, ['M'] = 1, ['N'] = 1,
+	['O'] = 1, ['P'] = 1, ['Q'] = 1, ['R'] = 1,
+	['S'] = 1, ['T'] = 1, ['U'] = 1, ['V'] = 1,
+	['W'] = 1, ['X'] = 1, ['Y'] = 1, ['Z'] = 1,
+	['_'] = 1, ['a'] = 1, ['b'] = 1, ['c'] = 1,
+	['d'] = 1, ['e'] = 1, ['f'] = 1, ['g'] = 1,
+	['h'] = 1, ['i'] = 1, ['j'] = 1, ['k'] = 1,
+	['l'] = 1, ['m'] = 1, ['n'] = 1, ['o'] = 1,
+	['p'] = 1, ['q'] = 1, ['r'] = 1, ['s'] = 1,
+	['t'] = 1, ['u'] = 1, ['v'] = 1, ['w'] = 1,
+	['x'] = 1, ['y'] = 1, ['z'] = 1,
+	};
+	if((*s) & 128) return 0;
+	if(!ascmap[*s] == 1) return 0;
+	++s;
 	while(*s) {
-		if(!strchr(iden_tail, *s))
+		if((*s) & 128) return 0;
+		if(!ascmap[*s])
 			return 0;
 		s++;
 	}
@@ -171,7 +186,17 @@ static enum tokentype categorize(const char *s) {
 
 
 static int is_sep(int c) {
-	return !!strchr(" \t\n()[]<>{}\?:;.,!=+-*&|/%#'\\\"", c);
+	static const char ascmap[128] = {
+		['\t'] = 1, ['\n'] = 1, [' '] = 1, ['!'] = 1,
+		['\"'] = 1, ['#'] = 1, ['%'] = 1, ['&'] = 1,
+		['\''] = 1, ['('] = 1, [')'] = 1, ['*'] = 1,
+		['+'] = 1, [','] = 1, ['-'] = 1, ['.'] = 1,
+		['/'] = 1, [':'] = 1, [';'] = 1, ['<'] = 1,
+		['='] = 1, ['>'] = 1, ['?'] = 1, ['['] = 1,
+		['\\'] = 1, [']'] = 1, ['{'] = 1, ['|'] = 1,
+		['}'] = 1,
+	};
+	return !(c&128) && ascmap[c];
 }
 
 static int apply_coords(struct tokenizer *t, struct token* out, char *end, int retval) {
