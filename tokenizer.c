@@ -115,14 +115,17 @@ static int is_hex_int_literal(const char *s) {
 	return 0;
 }
 
-static int is_dec_int_literal(const char *s) {
+static int is_dec_int_literal(const char *str) {
+	const char *s = str;
 	if(s[0] == '-') s++;
 	if(s[0] == '0') {
 		if(s[1] == 0) return 1;
 		if(isdigit(s[1])) return 0;
 	}
 	while(*s) {
-		if(!isdigit(*s)) return has_ul_tail(s);
+		if(!isdigit(*s))
+			if(s > str && (str[0] == '-' ? s > str+1 : 1)) return has_ul_tail(s);
+			else return 0;
 		s++;
 	}
 	return 1;
