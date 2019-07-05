@@ -2,7 +2,7 @@
 #include <ctype.h>
 #include <assert.h>
 #include "tokenizer.h"
-#include "../cdev/cdev/agsutils/List.h"
+#include "../cdev/cdev/lib/include/tglist.h"
 #include "khash.h"
 
 #define MACRO_FLAG_OBJECTLIKE 1U<<31
@@ -12,7 +12,7 @@ struct macro {
 	unsigned num_args;
 	FILE* str_contents;
 	char *str_contents_buf;
-	List /*const char* */ argnames;
+	tglist(cc, char*) argnames;
 };
 
 static int token_needs_string(struct token *tok) {
@@ -64,12 +64,11 @@ static int undef_macro(const char *name) {
 	fclose(m->str_contents);
 	free(m->str_contents_buf);
 	size_t i;
-	for(i = 0; i < List_size(&m->argnames); i++) {
-		char *item;
-		List_get(&m->argnames, i, &item);
+	for(i = 0; i < tglist_getsize(&m->argnames); i++) {
+		char *item = tglist_get(&m->argnames, i);
 		free(item);
 	}
-	List_free(&m->argnames);
+	tglist_free_items(&m->argnames);
 	kh_del(macros, macros, k);
 	return 1;
 }
@@ -284,7 +283,7 @@ static int parse_macro(struct tokenizer *t) {
 
 	struct macro new = { 0 };
 	unsigned macro_flags = MACRO_FLAG_OBJECTLIKE;
-	List_init(&new.argnames, sizeof(char*));
+	tglist_init(&new.argnames);
 
 	ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
 	if(!ret) return ret;
@@ -320,8 +319,8 @@ static int parse_macro(struct tokenizer *t) {
 				return 0;
 			}
 			{
-				const char *tmps = strdup(t->buf);
-				List_add(&new.argnames, &tmps);
+				char *tmps = strdup(t->buf);
+				tglist_add(&new.argnames, tmps);
 			}
 			++new.num_args;
 		}
@@ -368,9 +367,8 @@ done:
 
 static size_t macro_arglist_pos(struct macro *m, const char* iden) {
 	size_t i;
-	for(i = 0; i < List_size(&m->argnames); i++) {
-		char *item;
-		List_get(&m->argnames, i, &item);
+	for(i = 0; i < tglist_getsize(&m->argnames); i++) {
+		char *item = tglist_get(&m->argnames, i);
 		if(!strcmp(item, iden)) return i;
 	}
 	return (size_t) -1;
