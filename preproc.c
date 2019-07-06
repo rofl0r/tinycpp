@@ -3,7 +3,7 @@
 #include <assert.h>
 #include "tokenizer.h"
 #include "../cdev/cdev/lib/include/tglist.h"
-#include "khash.h"
+#include "../cdev/cdev/lib/include/bmap.h"
 
 #define MACRO_FLAG_OBJECTLIKE 1U<<31
 #define MACRO_ARGCOUNT_MASK ~(0|(MACRO_FLAG_OBJECTLIKE))
@@ -36,31 +36,26 @@ static void tokenizer_from_file(struct tokenizer *t, FILE* f) {
 	tokenizer_rewind(t);
 }
 
-KHASH_MAP_INIT_STR(macros, struct macro)
-
-static khash_t(macros) *macros;
-
-static struct macro* get_macro(const char *name) {
-	khint_t k = kh_get(macros, macros, name);
-	if(k == kh_end(macros)) return 0;
-	return &kh_value(macros, k);
+static int strptrcmp(const void *a, const void *b) {
+	const char * const *x = a;
+	const char * const *y = b;
+	return strcmp(*x, *y);
 }
 
-static int add_macro(const char *name, struct macro*m) {
-	int absent;
-	khint_t k = kh_put(macros, macros, name, &absent);
-	if (!absent) {
-		// FIXME free contents of macro struct
-		// kh_del(macros, macros, k);
-	}
-	kh_value(macros, k) = *m;
-	return !absent;
+static bmap(m, char*, struct macro) *macros;
+
+static struct macro* get_macro(const char *name) {
+	return bmap_get(macros, name);
+}
+
+static void add_macro(const char *name, struct macro*m) {
+	bmap_insert(macros, name, *m);
 }
 
 static int undef_macro(const char *name) {
-	khint_t k = kh_get(macros, macros, name);
-	if(k == kh_end(macros)) return 0;
-	struct macro *m = &kh_value(macros, k);
+	ssize_t k = bmap_find(macros, name);
+	if(k == -1) return 0;
+	struct macro *m = &bmap_getval(macros, k);
 	fclose(m->str_contents);
 	free(m->str_contents_buf);
 	size_t i;
@@ -69,7 +64,7 @@ static int undef_macro(const char *name) {
 		free(item);
 	}
 	tglist_free_items(&m->argnames);
-	kh_del(macros, macros, k);
+	bmap_delete(macros, k);
 	return 1;
 }
 
@@ -1121,7 +1116,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 }
 
 int preprocessor_run(FILE* in, const char* inname, FILE* out) {
-	macros = kh_init(macros);
+	macros = bmap_new(strptrcmp);
 	add_defined_macro();
 	return parse_file(in, inname, out);
 }
