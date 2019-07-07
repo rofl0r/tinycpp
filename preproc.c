@@ -553,8 +553,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 			}
 			if(!parens && is_char(&tok, ',')) {
 				if(need_arg && !ws_count) {
-					error("unexpected: ','", t, &tok);
-					return 0;
+					/* empty argument is OK */
 				}
 				need_arg = 1;
 				curr_arg++;
