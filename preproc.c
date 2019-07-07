@@ -3,10 +3,19 @@
 #include <assert.h>
 #include "tokenizer.h"
 #include "../cdev/cdev/lib/include/tglist.h"
-#include "../cdev/cdev/lib/include/bmap.h"
+#include "../cdev/cdev/lib/include/hbmap.h"
 
 #define MACRO_FLAG_OBJECTLIKE 1U<<31
 #define MACRO_ARGCOUNT_MASK ~(0|(MACRO_FLAG_OBJECTLIKE))
+
+static unsigned string_hash(const char* s) {
+	uint_fast32_t h = 0;
+	while (*s) {
+		h = 16*h + *s++;
+		h ^= h>>24 & 0xf0;
+	}
+	return h & 0xfffffff;
+}
 
 struct macro {
 	unsigned num_args;
@@ -42,20 +51,20 @@ static int strptrcmp(const void *a, const void *b) {
 	return strcmp(*x, *y);
 }
 
-static bmap(m, char*, struct macro) *macros;
+static hbmap(m, char*, struct macro, 128) *macros;
 
 static struct macro* get_macro(const char *name) {
-	return bmap_get(macros, name);
+	return hbmap_get(macros, name);
 }
 
 static void add_macro(const char *name, struct macro*m) {
-	bmap_insert(macros, name, *m);
+	hbmap_insert(macros, name, *m);
 }
 
 static int undef_macro(const char *name) {
-	ssize_t k = bmap_find(macros, name);
-	if(k == -1) return 0;
-	struct macro *m = &bmap_getval(macros, k);
+	hbmap_iter k = hbmap_find(macros, name);
+	if(k == (hbmap_iter) -1) return 0;
+	struct macro *m = &hbmap_getval(macros, k);
 	fclose(m->str_contents);
 	free(m->str_contents_buf);
 	size_t i;
@@ -64,7 +73,7 @@ static int undef_macro(const char *name) {
 		free(item);
 	}
 	tglist_free_items(&m->argnames);
-	bmap_delete(macros, k);
+	hbmap_delete(macros, k);
 	return 1;
 }
 
@@ -1116,7 +1125,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 }
 
 int preprocessor_run(FILE* in, const char* inname, FILE* out) {
-	macros = bmap_new(strptrcmp);
+	macros = hbmap_new(strptrcmp, string_hash, 128);
 	add_defined_macro();
 	return parse_file(in, inname, out);
 }
