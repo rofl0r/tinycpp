@@ -1,6 +1,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
+#include "preproc.h"
 #include "tokenizer.h"
 #include "../cdev/cdev/lib/include/tglist.h"
 #include "../cdev/cdev/lib/include/hbmap.h"
@@ -21,7 +22,12 @@ struct macro {
 	unsigned num_args;
 	FILE* str_contents;
 	char *str_contents_buf;
-	tglist(cc, char*) argnames;
+	tglist(char*) argnames;
+};
+
+struct cpp {
+	tglist(char*) includedirs;
+	hbmap(char*, struct macro, 128) *macros;
 };
 
 static int token_needs_string(struct token *tok) {
@@ -51,44 +57,35 @@ static int strptrcmp(const void *a, const void *b) {
 	return strcmp(*x, *y);
 }
 
-static hbmap(m, char*, struct macro, 128) *macros;
-
-static struct macro* get_macro(const char *name) {
-	return hbmap_get(macros, name);
+static struct macro* get_macro(struct cpp *cpp, const char *name) {
+	return hbmap_get(cpp->macros, name);
 }
 
-static void add_macro(const char *name, struct macro*m) {
-	hbmap_insert(macros, name, *m);
+static void add_macro(struct cpp *cpp, const char *name, struct macro*m) {
+	hbmap_insert(cpp->macros, name, *m);
 }
 
-static int undef_macro(const char *name) {
-	hbmap_iter k = hbmap_find(macros, name);
+static int undef_macro(struct cpp *cpp, const char *name) {
+	hbmap_iter k = hbmap_find(cpp->macros, name);
 	if(k == (hbmap_iter) -1) return 0;
-	struct macro *m = &hbmap_getval(macros, k);
-	free(hbmap_getkey(macros, k));
+	struct macro *m = &hbmap_getval(cpp->macros, k);
+	free(hbmap_getkey(cpp->macros, k));
 	if(m->str_contents) fclose(m->str_contents);
 	free(m->str_contents_buf);
 	tglist_free_values(&m->argnames);
 	tglist_free_items(&m->argnames);
-	hbmap_delete(macros, k);
+	hbmap_delete(cpp->macros, k);
 	return 1;
 }
 
-static void add_defined_macro(void) {
-	struct macro m = {
-		.num_args = 1,
-	};
-	add_macro(strdup("defined"), &m);
-}
-
-static void free_macros(void) {
+static void free_macros(struct cpp *cpp) {
 	hbmap_iter i;
-	hbmap_foreach(macros, i) {
-		while(hbmap_iter_index_valid(macros, i))
-			undef_macro(hbmap_getkey(macros, i));
+	hbmap_foreach(cpp->macros, i) {
+		while(hbmap_iter_index_valid(cpp->macros, i))
+			undef_macro(cpp, hbmap_getkey(cpp->macros, i));
 	}
-	hbmap_fini(macros, 1);
-	free(macros);
+	hbmap_fini(cpp->macros, 1);
+	free(cpp->macros);
 }
 
 static void error_or_warning(const char *err, const char* type, struct tokenizer *t, struct token *curr) {
@@ -190,8 +187,8 @@ static void emit_token(FILE* out, struct token *tok, const char* strbuf) {
 	}
 }
 
-int parse_file(FILE *f, const char*, FILE *out);
-static int include_file(struct tokenizer *t, FILE* out) {
+int parse_file(struct cpp* cpp, FILE *f, const char*, FILE *out);
+static int include_file(struct cpp* cpp, struct tokenizer *t, FILE* out) {
 	static const char* inc_chars[] = { "\"", "<", 0};
 	static const char* inc_chars_end[] = { "\"", ">", 0};
 	struct token tok;
@@ -208,7 +205,14 @@ static int include_file(struct tokenizer *t, FILE* out) {
 		return 0;
 	}
 	// TODO: different path lookup depending on whether " or <
-	FILE *f = fopen(t->buf, "r");
+	size_t i;
+	FILE *f = 0;
+	tglist_foreach(&cpp->includedirs, i) {
+		char buf[512];
+		snprintf(buf, sizeof buf, "%s/%s", tglist_get(&cpp->includedirs, i), t->buf);
+		f = fopen(buf, "r");
+		if(f) break;
+	}
 	if(!f) {
 		dprintf(2, "%s: ", t->buf);
 		perror("fopen");
@@ -218,7 +222,7 @@ static int include_file(struct tokenizer *t, FILE* out) {
 	assert(tokenizer_next(t, &tok) && is_char(&tok, inc_chars_end[inc1sep][0]));
 
 	tokenizer_set_flags(t, TF_PARSE_STRINGS);
-	return parse_file(f, fn, out);
+	return parse_file(cpp, f, fn, out);
 }
 
 static int emit_error_or_warning(struct tokenizer *t, int is_error) {
@@ -261,9 +265,9 @@ err:
 	return consume_nl_and_ws(t, tok, expected);
 }
 
-static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level, char *visited[]);
+static int expand_macro(struct cpp *cpp, struct tokenizer *t, FILE* out, const char* name, unsigned rec_level, char *visited[]);
 
-static int parse_macro(struct tokenizer *t) {
+static int parse_macro(struct cpp *cpp, struct tokenizer *t) {
 	int ws_count;
 	int ret = tokenizer_skip_chars(t, " \t", &ws_count);
 	if(!ret) return ret;
@@ -281,7 +285,7 @@ static int parse_macro(struct tokenizer *t) {
 #ifdef DEBUG
 	dprintf(2, "parsing macro %s\n", macroname);
 #endif
-	if(get_macro(macroname)) {
+	if(get_macro(cpp, macroname)) {
 		if(!strcmp(macroname, "defined")) {
 			error("\"defined\" cannot be used as a macro name", t, &curr);
 			return 0;
@@ -372,7 +376,7 @@ static int parse_macro(struct tokenizer *t) {
 	new.str_contents_buf = contents.buf;
 done:
 	new.num_args |= macro_flags;
-	add_macro(macroname, &new);
+	add_macro(cpp, macroname, &new);
 	return 1;
 }
 
@@ -401,7 +405,8 @@ static int was_visited(const char *name, char*visited[], unsigned rec_level) {
 	return 0;
 }
 
-unsigned get_macro_info(struct tokenizer *t,
+unsigned get_macro_info(struct cpp* cpp,
+	struct tokenizer *t,
 	struct macro_info *mi_list, size_t *mi_cnt,
 	unsigned nest, unsigned tpos, const char *name,
 	char* visited[], unsigned rec_level
@@ -415,12 +420,12 @@ unsigned get_macro_info(struct tokenizer *t,
 		dprintf(2, "(%s) nest %d, brace %u t: %s\n", name, nest, brace_lvl, t->buf);
 #endif
 		struct macro* m = 0;
-		if(tok.type == TT_IDENTIFIER && (m = get_macro(t->buf)) && !was_visited(t->buf, visited, rec_level)) {
+		if(tok.type == TT_IDENTIFIER && (m = get_macro(cpp, t->buf)) && !was_visited(t->buf, visited, rec_level)) {
 			const char* newname = strdup(t->buf);
 			if(!(m->num_args & MACRO_FLAG_OBJECTLIKE)) {
 				if(tokenizer_peek(t) == '(') {
 					unsigned tpos_save = tpos;
-					tpos = get_macro_info(t, mi_list, mi_cnt, nest+1, tpos+1, newname, visited, rec_level);
+					tpos = get_macro_info(cpp, t, mi_list, mi_cnt, nest+1, tpos+1, newname, visited, rec_level);
 					mi_list[*mi_cnt] = (struct macro_info) {
 						.name = newname,
 						.nest=nest+1,
@@ -499,13 +504,13 @@ static int mem_tokenizers_join(
 /* rec_level -1 serves as a magic value to signal we're using
    expand_macro from the if-evaluator code, which means activating
    the "define" macro */
-static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level, char* visited[]) {
+static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const char* name, unsigned rec_level, char* visited[]) {
 	int is_define = !strcmp(name, "defined");
 
 	struct macro *m;
 	if(is_define && rec_level != -1)
 		m = NULL;
-	else m = get_macro(name);
+	else m = get_macro(cpp, name);
 	if(!m) {
 		emit(out, name);
 		return 1;
@@ -586,7 +591,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	}
 
 	if(is_define) {
-		if(get_macro(argvalues[0].buf))
+		if(get_macro(cpp, argvalues[0].buf))
 			emit(out, "1");
 		else
 			emit(out, "0");
@@ -677,7 +682,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		while(1) {
 			int ret = x_tokenizer_next(&cwae.t, &tok);
 			if(!ret || tok.type == TT_EOF) break;
-			if(tok.type == TT_IDENTIFIER && get_macro(cwae.t.buf))
+			if(tok.type == TT_IDENTIFIER && get_macro(cpp, cwae.t.buf))
 				++mac_cnt;
 		}
 
@@ -685,7 +690,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 		struct macro_info *mcs = calloc(mac_cnt, sizeof(struct macro_info));
 		{
 			size_t mac_iter = 0;
-			get_macro_info(&cwae.t, mcs, &mac_iter, 0, 0, "null", visited, rec_level);
+			get_macro_info(cpp, &cwae.t, mcs, &mac_iter, 0, 0, "null", visited, rec_level);
 			/* some of the macros might not expand at this stage (without braces)*/
 			while(mac_cnt && mcs[mac_cnt-1].name == 0)
 				--mac_cnt;
@@ -704,7 +709,7 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					tokenizer_next(&cwae.t, &utok);
 				struct FILE_container t2 = {0}, tmp = {0};
 				t2.f = open_memstream(&t2.buf, &t2.len);
-				if(!expand_macro(&cwae.t, t2.f, mi->name, rec_level+1, visited))
+				if(!expand_macro(cpp, &cwae.t, t2.f, mi->name, rec_level+1, visited))
 					return 0;
 				t2.f = freopen_r(t2.f, &t2.buf, &t2.len);
 				tokenizer_from_file(&t2.t, t2.f);
@@ -938,7 +943,7 @@ static int do_eval(struct tokenizer *t, int *result) {
 	return 1;
 }
 
-static int evaluate_condition(struct tokenizer *t, int *result, char *visited[]) {
+static int evaluate_condition(struct cpp *cpp, struct tokenizer *t, int *result, char *visited[]) {
 	int ret, backslash_seen = 0;
 	struct token curr;
 	char *bufp;
@@ -954,7 +959,7 @@ static int evaluate_condition(struct tokenizer *t, int *result, char *visited[])
 		ret = tokenizer_next(t, &curr);
 		if(!ret) return ret;
 		if(curr.type == TT_IDENTIFIER) {
-			if(!expand_macro(t, f, t->buf, -1, visited)) return 0;
+			if(!expand_macro(cpp, t, f, t->buf, -1, visited)) return 0;
 		} else if(curr.type == TT_SEP) {
 			if(curr.value == '\\')
 				backslash_seen = 1;
@@ -990,7 +995,7 @@ static void free_visited(char *visited[]) {
 
 }
 
-int parse_file(FILE *f, const char *fn, FILE *out) {
+int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 	struct tokenizer t;
 	struct token curr;
 	tokenizer_init(&t, f, TF_PARSE_STRINGS);
@@ -1039,7 +1044,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 			}
 			switch(index) {
 			case 0:
-				ret = include_file(&t, out);
+				ret = include_file(cpp, &t, out);
 				if(!ret) return ret;
 				break;
 			case 1:
@@ -1051,7 +1056,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				if(!ret) return ret;
 				break;
 			case 3:
-				ret = parse_macro(&t);
+				ret = parse_macro(cpp, &t);
 				if(!ret) return ret;
 				break;
 			case 4:
@@ -1060,12 +1065,12 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 					error("expected identifier", &t, &curr);
 					return 0;
 				}
-				undef_macro(t.buf);
+				undef_macro(cpp, t.buf);
 				break;
 			case 5: // if
 				if(all_levels_active()) {
 					char* visited[MAX_RECURSION] = {0};
-					if(!evaluate_condition(&t, &ret, visited)) return 0;
+					if(!evaluate_condition(cpp, &t, &ret, visited)) return 0;
 					free_visited(visited);
 					set_level(if_level + 1, ret);
 				} else {
@@ -1075,7 +1080,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 			case 6: // elif
 				if(prev_level_active() && if_level_satisfied < if_level) {
 					char* visited[MAX_RECURSION] = {0};
-					if(!evaluate_condition(&t, &ret, visited)) return 0;
+					if(!evaluate_condition(cpp, &t, &ret, visited)) return 0;
 					free_visited(visited);
 					if(ret) {
 						if_level_active = if_level;
@@ -1097,7 +1102,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				break;
 			case 8: // ifdef
 				if(!skip_next_and_ws(&t, &curr) || curr.type == TT_EOF) return 0;
-				ret = !!get_macro(t.buf);
+				ret = !!get_macro(cpp, t.buf);
 
 				if(all_levels_active()) {
 					set_level(if_level + 1, ret);
@@ -1126,7 +1131,7 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 #endif
 		if(curr.type == TT_IDENTIFIER) {
 			char* visited[MAX_RECURSION] = {0};
-			if(!expand_macro(&t, out, t.buf, 0, visited))
+			if(!expand_macro(cpp, &t, out, t.buf, 0, visited))
 				return 0;
 			free_visited(visited);
 		} else {
@@ -1143,14 +1148,27 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 	return ret;
 }
 
-int preprocessor_run(FILE* in, const char* inname, FILE* out) {
-	macros = hbmap_new(strptrcmp, string_hash, 128);
-	add_defined_macro();
-	int ret = parse_file(in, inname, out);
-	free_macros();
+struct cpp * cpp_new(void) {
+	struct cpp* ret = calloc(1, sizeof(struct cpp));
+	if(!ret) return ret;
+	tglist_init(&ret->includedirs);
+	cpp_add_includedir(ret, ".");
+	ret->macros = hbmap_new(strptrcmp, string_hash, 128);
+	struct macro m = {.num_args = 1};
+	add_macro(ret, strdup("defined"), &m);
 	return ret;
 }
 
-int main(int argc, char** argv) {
-	return !preprocessor_run(stdin, "stdin", stdout);
+void cpp_free(struct cpp*cpp) {
+	free_macros(cpp);
+	tglist_free_values(&cpp->includedirs);
+	tglist_free_items(&cpp->includedirs);
+}
+
+void cpp_add_includedir(struct cpp *cpp, const char* includedir) {
+	tglist_add(&cpp->includedirs, strdup(includedir));
+}
+
+int cpp_run(struct cpp *cpp, FILE* in, FILE* out, const char* inname) {
+	return parse_file(cpp, in, inname, out);
 }
