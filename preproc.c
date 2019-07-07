@@ -856,7 +856,10 @@ static int nud(struct tokenizer *t, struct token *tok) {
 
 static int led(struct tokenizer *t, int left, struct token *tok) {
 	switch(tok->type) {
-		case TT_LAND: return left && expr(t, bp(tok->type));
+		case TT_LAND: {
+			int right = expr(t, bp(tok->type));
+			return left && right;
+		}
 		case TT_LOR:  return left || expr(t, bp(tok->type));
 		case TT_LTE:  return left <= expr(t, bp(tok->type));
 		case TT_GTE:  return left >= expr(t, bp(tok->type));
