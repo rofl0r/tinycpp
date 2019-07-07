@@ -1022,7 +1022,7 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 #define skip_conditional_block (if_level > if_level_active)
 
 	const char *macro_name = 0;
-	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "else", "ifdef", "endif", 0};
+	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "else", "ifdef", "ifndef", "endif", 0};
 	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
 		newline = curr.column == 0;
 		if(newline) {
@@ -1104,8 +1104,10 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 				}
 				break;
 			case 8: // ifdef
+			case 9: // ifndef
 				if(!skip_next_and_ws(&t, &curr) || curr.type == TT_EOF) return 0;
 				ret = !!get_macro(cpp, t.buf);
+				if(index == 9) ret = !ret;
 
 				if(all_levels_active()) {
 					set_level(if_level + 1, ret);
@@ -1113,7 +1115,7 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 					set_level(if_level + 1, 0);
 				}
 				break;
-			case 9: // endif
+			case 10: // endif
 				set_level(if_level-1, -1);
 			default:
 				break;
