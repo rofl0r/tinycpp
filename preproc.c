@@ -65,13 +65,10 @@ static int undef_macro(const char *name) {
 	hbmap_iter k = hbmap_find(macros, name);
 	if(k == (hbmap_iter) -1) return 0;
 	struct macro *m = &hbmap_getval(macros, k);
-	fclose(m->str_contents);
+	free(hbmap_getkey(macros, k));
+	if(m->str_contents) fclose(m->str_contents);
 	free(m->str_contents_buf);
-	size_t i;
-	for(i = 0; i < tglist_getsize(&m->argnames); i++) {
-		char *item = tglist_get(&m->argnames, i);
-		free(item);
-	}
+	tglist_free_values(&m->argnames);
 	tglist_free_items(&m->argnames);
 	hbmap_delete(macros, k);
 	return 1;
@@ -81,7 +78,17 @@ static void add_defined_macro(void) {
 	struct macro m = {
 		.num_args = 1,
 	};
-	add_macro("defined", &m);
+	add_macro(strdup("defined"), &m);
+}
+
+static void free_macros(void) {
+	hbmap_iter i;
+	hbmap_foreach(macros, i) {
+		while(hbmap_iter_index_valid(macros, i))
+			undef_macro(hbmap_getkey(macros, i));
+	}
+	hbmap_fini(macros, 1);
+	free(macros);
 }
 
 static void error_or_warning(const char *err, const char* type, struct tokenizer *t, struct token *curr) {
@@ -254,7 +261,7 @@ err:
 	return consume_nl_and_ws(t, tok, expected);
 }
 
-static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level);
+static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level, char *visited[]);
 
 static int parse_macro(struct tokenizer *t) {
 	int ws_count;
@@ -492,7 +499,7 @@ static int mem_tokenizers_join(
 /* rec_level -1 serves as a magic value to signal we're using
    expand_macro from the if-evaluator code, which means activating
    the "define" macro */
-static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level) {
+static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsigned rec_level, char* visited[]) {
 	int is_define = !strcmp(name, "defined");
 
 	struct macro *m;
@@ -512,8 +519,6 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 	dprintf(2, "lvl %u: expanding macro %s (%s)\n", rec_level, name, m->str_contents_buf);
 #endif
 
-	/* FIXME: make this a parameter */
-	static char* visited[MAX_RECURSION] = {0};
 	if(visited[rec_level]) free(visited[rec_level]);
 	visited[rec_level] = strdup(name);
 
@@ -699,13 +704,14 @@ static int expand_macro(struct tokenizer *t, FILE* out, const char* name, unsign
 					tokenizer_next(&cwae.t, &utok);
 				struct FILE_container t2 = {0}, tmp = {0};
 				t2.f = open_memstream(&t2.buf, &t2.len);
-				if(!expand_macro(&cwae.t, t2.f, mi->name, rec_level+1))
+				if(!expand_macro(&cwae.t, t2.f, mi->name, rec_level+1, visited))
 					return 0;
 				t2.f = freopen_r(t2.f, &t2.buf, &t2.len);
 				tokenizer_from_file(&t2.t, t2.f);
 				tokenizer_rewind(&cwae.t);
 				int diff = mem_tokenizers_join(&cwae, &t2, &tmp, mi->first, mi->last);
 				free_file_container(&cwae);
+				free_file_container(&t2);
 				cwae = tmp;
 				if(diff == 0) continue;
 				for(j = 0; j < mac_cnt; ++j) {
@@ -932,7 +938,7 @@ static int do_eval(struct tokenizer *t, int *result) {
 	return 1;
 }
 
-static int evaluate_condition(struct tokenizer *t, int *result) {
+static int evaluate_condition(struct tokenizer *t, int *result, char *visited[]) {
 	int ret, backslash_seen = 0;
 	struct token curr;
 	char *bufp;
@@ -948,7 +954,7 @@ static int evaluate_condition(struct tokenizer *t, int *result) {
 		ret = tokenizer_next(t, &curr);
 		if(!ret) return ret;
 		if(curr.type == TT_IDENTIFIER) {
-			if(!expand_macro(t, f, t->buf, -1)) return 0;
+			if(!expand_macro(t, f, t->buf, -1, visited)) return 0;
 		} else if(curr.type == TT_SEP) {
 			if(curr.value == '\\')
 				backslash_seen = 1;
@@ -975,6 +981,13 @@ static int evaluate_condition(struct tokenizer *t, int *result) {
 	fclose(f);
 	free(bufp);
 	return ret;
+}
+
+static void free_visited(char *visited[]) {
+	size_t i;
+	for(i=0; i< MAX_RECURSION; i++)
+		if(visited[i]) free(visited[i]);
+
 }
 
 int parse_file(FILE *f, const char *fn, FILE *out) {
@@ -1051,7 +1064,9 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				break;
 			case 5: // if
 				if(all_levels_active()) {
-					if(!evaluate_condition(&t, &ret)) return 0;
+					char* visited[MAX_RECURSION] = {0};
+					if(!evaluate_condition(&t, &ret, visited)) return 0;
+					free_visited(visited);
 					set_level(if_level + 1, ret);
 				} else {
 					set_level(if_level + 1, 0);
@@ -1059,7 +1074,9 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 				break;
 			case 6: // elif
 				if(prev_level_active() && if_level_satisfied < if_level) {
-					if(!evaluate_condition(&t, &ret)) return 0;
+					char* visited[MAX_RECURSION] = {0};
+					if(!evaluate_condition(&t, &ret, visited)) return 0;
+					free_visited(visited);
 					if(ret) {
 						if_level_active = if_level;
 						if_level_satisfied = if_level;
@@ -1108,8 +1125,10 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 			dprintf(1, "%s: %s\n", tokentype_to_str(curr.type), t.buf);
 #endif
 		if(curr.type == TT_IDENTIFIER) {
-			if(!expand_macro(&t, out, t.buf, 0))
+			char* visited[MAX_RECURSION] = {0};
+			if(!expand_macro(&t, out, t.buf, 0, visited))
 				return 0;
+			free_visited(visited);
 		} else {
 			emit_token(out, &curr, t.buf);
 		}
@@ -1127,7 +1146,9 @@ int parse_file(FILE *f, const char *fn, FILE *out) {
 int preprocessor_run(FILE* in, const char* inname, FILE* out) {
 	macros = hbmap_new(strptrcmp, string_hash, 128);
 	add_defined_macro();
-	return parse_file(in, inname, out);
+	int ret = parse_file(in, inname, out);
+	free_macros();
+	return ret;
 }
 
 int main(int argc, char** argv) {
