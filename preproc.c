@@ -405,7 +405,7 @@ unsigned get_macro_info(struct tokenizer *t,
 		int ret = tokenizer_next(t, &tok);
 		if(!ret || tok.type == TT_EOF) break;
 #ifdef DEBUG
-		dprintf(2, "(%s) nest %d, brace %zu t: %s\n", name, nest, brace_lvl, t->buf);
+		dprintf(2, "(%s) nest %d, brace %u t: %s\n", name, nest, brace_lvl, t->buf);
 #endif
 		struct macro* m = 0;
 		if(tok.type == TT_IDENTIFIER && (m = get_macro(t->buf)) && !was_visited(t->buf, visited, rec_level)) {
