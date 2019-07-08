@@ -421,7 +421,7 @@ unsigned get_macro_info(struct cpp* cpp,
 	unsigned nest, unsigned tpos, const char *name,
 	char* visited[], unsigned rec_level
 	) {
-	unsigned brace_lvl = 0;
+	int brace_lvl = 0;
 	while(1) {
 		struct token tok;
 		int ret = tokenizer_next(t, &tok);
@@ -442,6 +442,8 @@ unsigned get_macro_info(struct cpp* cpp,
 						.first = tpos_save,
 						.last = tpos + 1};
 					++(*mi_cnt);
+				} else {
+					/* suppress expansion */
 				}
 			} else {
 				mi_list[*mi_cnt] = (struct macro_info) {
@@ -455,7 +457,7 @@ unsigned get_macro_info(struct cpp* cpp,
 			++brace_lvl;
 		} else if(is_char(&tok, ')')) {
 			--brace_lvl;
-			if(brace_lvl == 0) break;
+			if(brace_lvl == 0 && nest != 0) break;
 		}
 		++tpos;
 	}
