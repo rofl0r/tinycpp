@@ -420,6 +420,10 @@ void tokenizer_set_flags(struct tokenizer *t, int flags) {
 	t->flags = flags;
 }
 
+int tokenizer_get_flags(struct tokenizer *t) {
+	return t->flags;
+}
+
 void tokenizer_init(struct tokenizer *t, FILE* in, int flags) {
 	*t = (struct tokenizer){ .input = in, .line = 1, .flags = flags };
 }
