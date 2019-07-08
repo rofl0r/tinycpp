@@ -3,8 +3,8 @@
 #include <assert.h>
 #include "preproc.h"
 #include "tokenizer.h"
-#include "../cdev/cdev/lib/include/tglist.h"
-#include "../cdev/cdev/lib/include/hbmap.h"
+#include "tglist.h"
+#include "hbmap.h"
 
 #define MACRO_FLAG_OBJECTLIKE 1U<<31
 #define MACRO_ARGCOUNT_MASK ~(0|(MACRO_FLAG_OBJECTLIKE))
