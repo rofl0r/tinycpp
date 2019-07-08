@@ -287,15 +287,13 @@ static int parse_macro(struct cpp *cpp, struct tokenizer *t) {
 #ifdef DEBUG
 	dprintf(2, "parsing macro %s\n", macroname);
 #endif
+	int redefined = 0;
 	if(get_macro(cpp, macroname)) {
 		if(!strcmp(macroname, "defined")) {
 			error("\"defined\" cannot be used as a macro name", t, &curr);
 			return 0;
 		}
-
-		char buf[128];
-		sprintf(buf, "redefinition of macro %s", macroname);
-		warning(buf, t, 0);
+		redefined = 1;
 	}
 
 	struct macro new = { 0 };
@@ -377,6 +375,16 @@ static int parse_macro(struct cpp *cpp, struct tokenizer *t) {
 	new.str_contents = freopen_r(contents.f, &contents.buf, &contents.len);
 	new.str_contents_buf = contents.buf;
 done:
+	if(redefined) {
+		struct macro *old = get_macro(cpp, macroname);
+		char *s_old = old->str_contents_buf ? old->str_contents_buf : "";
+		char *s_new = new.str_contents_buf ? new.str_contents_buf : "";
+		if(strcmp(s_old, s_new)) {
+			char buf[128];
+			sprintf(buf, "redefinition of macro %s", macroname);
+			warning(buf, t, 0);
+		}
+	}
 	new.num_args |= macro_flags;
 	add_macro(cpp, macroname, &new);
 	return 1;
