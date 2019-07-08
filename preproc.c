@@ -817,6 +817,7 @@ static int expr(struct tokenizer *t, int rbp);
 
 static int charlit_to_int(const char *lit) {
 	if(lit[1] == '\\') switch(lit[2]) {
+		case '0': return 0;
 		case 'n': return 10;
 		case 't': return 9;
 		case 'r': return 13;
