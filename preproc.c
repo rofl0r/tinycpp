@@ -33,6 +33,8 @@ struct cpp {
 static int token_needs_string(struct token *tok) {
 	switch(tok->type) {
 		case TT_IDENTIFIER:
+		case TT_WIDECHAR_LIT:
+		case TT_WIDESTRING_LIT:
 		case TT_SQSTRING_LIT:
 		case TT_DQSTRING_LIT:
                 case TT_ELLIPSIS:
@@ -830,6 +832,7 @@ static int charlit_to_int(const char *lit) {
 static int nud(struct tokenizer *t, struct token *tok) {
 	switch(tok->type) {
 		case TT_IDENTIFIER: return 0;
+		case TT_WIDECHAR_LIT:
 		case TT_SQSTRING_LIT:  return charlit_to_int(t->buf);
 		case TT_HEX_INT_LIT:
 		case TT_OCT_INT_LIT:
@@ -951,6 +954,8 @@ static int evaluate_condition(struct cpp *cpp, struct tokenizer *t, int *result,
 	struct token curr;
 	char *bufp;
 	size_t size;
+	int tflags = tokenizer_get_flags(t);
+	tokenizer_set_flags(t, tflags | TF_PARSE_WIDE_STRINGS);
 	ret = tokenizer_next(t, &curr);
 	if(!ret) return ret;
 	if(!is_whitespace_token(&curr)) {
@@ -988,6 +993,7 @@ static int evaluate_condition(struct cpp *cpp, struct tokenizer *t, int *result,
 	ret = do_eval(&t2, result);
 	fclose(f);
 	free(bufp);
+	tokenizer_set_flags(t, tflags);
 	return ret;
 }
 
