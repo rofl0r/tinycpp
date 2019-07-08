@@ -28,6 +28,8 @@ struct macro {
 struct cpp {
 	tglist(char*) includedirs;
 	hbmap(char*, struct macro, 128) *macros;
+	const char *last_file;
+	int last_line;
 };
 
 static int token_needs_string(struct token *tok) {
@@ -535,6 +537,22 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 #ifdef DEBUG
 	dprintf(2, "lvl %u: expanding macro %s (%s)\n", rec_level, name, m->str_contents_buf);
 #endif
+
+	if(rec_level == 0 && strcmp(t->filename, "<macro>")) {
+		cpp->last_file = t->filename;
+		cpp->last_line = t->line;
+	}
+	if(!strcmp(name, "__FILE__")) {
+		emit(out, "\"");
+		emit(out, cpp->last_file);
+		emit(out, "\"");
+		return 1;
+	} else if(!strcmp(name, "__LINE__")) {
+		char buf[64];
+		sprintf(buf, "%d", cpp->last_line);
+		emit(out, buf);
+		return 1;
+	}
 
 	if(visited[rec_level]) free(visited[rec_level]);
 	visited[rec_level] = strdup(name);
@@ -1190,6 +1208,9 @@ struct cpp * cpp_new(void) {
 	ret->macros = hbmap_new(strptrcmp, string_hash, 128);
 	struct macro m = {.num_args = 1};
 	add_macro(ret, strdup("defined"), &m);
+	m.num_args = MACRO_FLAG_OBJECTLIKE;
+	add_macro(ret, strdup("__FILE__"), &m);
+	add_macro(ret, strdup("__LINE__"), &m);
 	return ret;
 }
 
