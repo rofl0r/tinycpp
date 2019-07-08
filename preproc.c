@@ -996,6 +996,9 @@ static int evaluate_condition(struct cpp *cpp, struct tokenizer *t, int *result,
 		error("#(el)if with no expression", t, &curr);
 		return 0;
 	}
+#ifdef DEBUG
+	dprintf(2, "evaluating condition %s\n", bufp);
+#endif
 	struct tokenizer t2;
 	tokenizer_from_file(&t2, f);
 	ret = do_eval(&t2, result);
