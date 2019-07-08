@@ -34,6 +34,8 @@ enum tokentype {
 	/* errors and similar */
 	TT_UNKNOWN,
 	TT_OVERFLOW,
+	TT_WIDECHAR_LIT,
+	TT_WIDESTRING_LIT,
 	TT_EOF,
 	TT_CUSTOM = 1000 /* start user defined tokentype values */
 };
@@ -49,6 +51,7 @@ struct token {
 
 enum tokenizer_flags {
 	TF_PARSE_STRINGS = 1 << 0,
+	TF_PARSE_WIDE_STRINGS = 1 << 1,
 };
 
 struct tokenizer {

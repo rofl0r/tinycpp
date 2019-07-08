@@ -59,6 +59,8 @@ void tokenizer_register_custom_token(struct tokenizer*t, int tokentype, const ch
 const char* tokentype_to_str(enum tokentype tt) {
 	switch(tt) {
 		case TT_IDENTIFIER: return "iden";
+		case TT_WIDECHAR_LIT: return "widechar";
+		case TT_WIDESTRING_LIT: return "widestring";
 		case TT_SQSTRING_LIT: return "single-quoted string";
 		case TT_DQSTRING_LIT: return "double-quoted string";
 		case TT_ELLIPSIS: return "ellipsis";
@@ -212,7 +214,7 @@ static inline char *assign_bufchar(struct tokenizer *t, char *s, int c) {
 	return s + 1;
 }
 
-static int get_string(struct tokenizer *t, char quote_char, struct token* out) {
+static int get_string(struct tokenizer *t, char quote_char, struct token* out, int wide) {
 	char *s = t->buf+1;
 	int escaped = 0;
 	while((uintptr_t)s < (uintptr_t)t->buf + MAX_TOK_LEN + 2) {
@@ -232,7 +234,10 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out) {
 				s = assign_bufchar(t, s, c);
 				*s = 0;
 				//s = assign_bufchar(t, s, 0);
-				out->type = (quote_char == '"'? TT_DQSTRING_LIT : TT_SQSTRING_LIT);
+				if(!wide)
+					out->type = (quote_char == '"'? TT_DQSTRING_LIT : TT_SQSTRING_LIT);
+				else
+					out->type = (quote_char == '"'? TT_WIDESTRING_LIT : TT_WIDECHAR_LIT);
 				return apply_coords(t, out, s, 1);
 			}
 			if(c == '\\') escaped = 1;
@@ -365,6 +370,12 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			tokenizer_ungetc(t, c);
 			break;
 		}
+		if((t->flags & TF_PARSE_WIDE_STRINGS) && s == t->buf && c == 'L') {
+			c = tokenizer_getc(t);
+			tokenizer_ungetc(t, c);
+			tokenizer_ungetc(t, 'L');
+			if(c == '\'' || c == '\"') break;
+		}
 
 		s = assign_bufchar(t, s, c);
 		if(t->column + 1 >= MAX_TOK_LEN) {
@@ -378,7 +389,14 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			return apply_coords(t, out, s, 1);
 		}
 
+		int wide = 0;
 		c = tokenizer_getc(t);
+		if((t->flags & TF_PARSE_WIDE_STRINGS) && c == 'L') {
+			c = tokenizer_getc(t);
+			assert(c == '\'' || c == '\"');
+			wide = 1;
+			goto string_handling;
+		}
 
 		{
 			int i;
@@ -395,11 +413,12 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 				}
 		}
 
+string_handling:
 		s = assign_bufchar(t, s, c);
 		*s = 0;
 		//s = assign_bufchar(t, s, 0);
 		if(c == '"' || c == '\'')
-			if(t->flags & TF_PARSE_STRINGS) return get_string(t, c, out);
+			if(t->flags & TF_PARSE_STRINGS) return get_string(t, c, out, wide);
 		out->type = TT_SEP;
 		out->value = c;
 		if(c == '\n') {
