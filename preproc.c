@@ -1038,7 +1038,7 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 			ret = eat_whitespace(&t, &curr, &ws_count);
 		}
 		if(!ret || curr.type == TT_EOF) break;
-		if(skip_conditional_block && !is_char(&curr, '#')) continue;
+		if(skip_conditional_block && !(newline && is_char(&curr, '#'))) continue;
 		if(is_char(&curr, '#')) {
 			if(!newline) {
 				error("stray #", &t, &curr);
