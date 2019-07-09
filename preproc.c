@@ -9,6 +9,11 @@
 #define MACRO_FLAG_OBJECTLIKE 1U<<31
 #define MACRO_ARGCOUNT_MASK ~(0|(MACRO_FLAG_OBJECTLIKE))
 
+#define OBJECTLIKE(M) (M->num_args & MACRO_FLAG_OBJECTLIKE)
+#define FUNCTIONLIKE(M) (!(OBJECTLIKE(M)))
+
+#define MAX_RECURSION 32
+
 static unsigned string_hash(const char* s) {
 	uint_fast32_t h = 0;
 	while (*s) {
@@ -30,6 +35,7 @@ struct cpp {
 	hbmap(char*, struct macro, 128) *macros;
 	const char *last_file;
 	int last_line;
+	struct tokenizer *tchain[MAX_RECURSION];
 };
 
 static int token_needs_string(struct token *tok) {
@@ -434,7 +440,7 @@ unsigned get_macro_info(struct cpp* cpp,
 		struct macro* m = 0;
 		if(tok.type == TT_IDENTIFIER && (m = get_macro(cpp, t->buf)) && !was_visited(t->buf, visited, rec_level)) {
 			const char* newname = strdup(t->buf);
-			if(!(m->num_args & MACRO_FLAG_OBJECTLIKE)) {
+			if(FUNCTIONLIKE(m)) {
 				if(tokenizer_peek(t) == '(') {
 					unsigned tpos_save = tpos;
 					tpos = get_macro_info(cpp, t, mi_list, mi_cnt, nest+1, tpos+1, newname, visited, rec_level);
@@ -481,7 +487,7 @@ static void free_file_container(struct FILE_container *fc) {
 static int mem_tokenizers_join(
 	struct FILE_container* org, struct FILE_container *inj,
 	struct FILE_container* result,
-	unsigned first, unsigned last) {
+	int first, off_t lastpos) {
 	result->f = open_memstream(&result->buf, &result->len);
 	size_t i;
 	struct token tok;
@@ -492,28 +498,41 @@ static int mem_tokenizers_join(
 		assert(ret && tok.type != TT_EOF);
 		emit_token(result->f, &tok, org->t.buf);
 	}
-	int cnt = 0;
+	int cnt = 0, last = first;
 	while(1) {
 		ret = tokenizer_next(&inj->t, &tok);
 		if(!ret || tok.type == TT_EOF) break;
 		emit_token(result->f, &tok, inj->t.buf);
 		++cnt;
 	}
+	while(tokenizer_ftello(&org->t) < lastpos) {
+		ret = tokenizer_next(&org->t, &tok);
+		last++;
+	}
+
 	int diff = cnt - ((int) last - (int) first);
-	for(i = 0; i < last - first; ++i)
-		tokenizer_next(&org->t, &tok);
+
 	while(1) {
 		ret = tokenizer_next(&org->t, &tok);
 		if(!ret || tok.type == TT_EOF) break;
 		emit_token(result->f, &tok, org->t.buf);
 	}
+
 	result->f = freopen_r(result->f, &result->buf, &result->len);
 	tokenizer_from_file(&result->t, result->f);
 	return diff;
 }
 
-
-#define MAX_RECURSION 32
+static int tchain_parens_follows(struct cpp *cpp, int rec_level) {
+	int i, c = 0;
+	for(i=rec_level;i>=0;--i) {
+		c = tokenizer_peek(cpp->tchain[i]);
+		if(c == EOF) continue;
+		if(c == '(') return i;
+		else break;
+	}
+	return -1;
+}
 
 /* rec_level -1 serves as a magic value to signal we're using
    expand_macro from the if-evaluator code, which means activating
@@ -556,6 +575,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 
 	if(visited[rec_level]) free(visited[rec_level]);
 	visited[rec_level] = strdup(name);
+	cpp->tchain[rec_level] = t;
 
 	size_t i;
 	struct token tok;
@@ -566,11 +586,21 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		argvalues[i].f = open_memstream(&argvalues[i].buf, &argvalues[i].len);
 
 	/* replace named arguments in the contents of the macro call */
-	if(!(m->num_args & MACRO_FLAG_OBJECTLIKE)) {
-		if(expect(t, TT_SEP, (const char*[]){"(", 0}, &tok) != 0) {
-			error("expected (", t, &tok);
-			return 0;
+	if(FUNCTIONLIKE(m)) {
+		int ret;
+		if((ret = tokenizer_peek(t)) != '(') {
+			/* function-like macro shall not be expanded if not followed by '(' */
+			if(ret == EOF && rec_level > 0 && (ret = tchain_parens_follows(cpp, rec_level-1)) != -1) {
+				warning("Replacement text involved subsequent text", t, 0);
+				t = cpp->tchain[ret];
+			} else {
+				emit(out, name);
+				goto cleanup;
+			}
 		}
+		ret = x_tokenizer_next(t, &tok);
+		assert(ret && is_char(&tok, '('));
+
 		unsigned curr_arg = 0, need_arg = 1, parens = 0, ws_count;
 		if(!tokenizer_skip_chars(t, " \t", &ws_count)) return 0;
 
@@ -742,11 +772,19 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 					return 0;
 				t2.f = freopen_r(t2.f, &t2.buf, &t2.len);
 				tokenizer_from_file(&t2.t, t2.f);
+				/* manipulating the stream in case more stuff has been consumed */
+				off_t cwae_pos = tokenizer_ftello(&cwae.t);
 				tokenizer_rewind(&cwae.t);
-				int diff = mem_tokenizers_join(&cwae, &t2, &tmp, mi->first, mi->last);
+#ifdef DEBUG
+				dprintf(2, "merging %s with %s\n", cwae.buf, t2.buf);
+#endif
+				int diff = mem_tokenizers_join(&cwae, &t2, &tmp, mi->first, cwae_pos);
 				free_file_container(&cwae);
 				free_file_container(&t2);
 				cwae = tmp;
+#ifdef DEBUG
+				dprintf(2, "result: %s\n", cwae.buf);
+#endif
 				if(diff == 0) continue;
 				for(j = 0; j < mac_cnt; ++j) {
 					if(j == i) continue;
@@ -768,9 +806,16 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		tokenizer_rewind(&cwae.t);
 		while(1) {
 			int ret = x_tokenizer_next(&cwae.t, &tok);
+			struct macro *ma;
 			if(!ret) return ret;
 			if(tok.type == TT_EOF) break;
-			emit_token(out, &tok, cwae.t.buf);
+			if(tok.type == TT_IDENTIFIER && tokenizer_peek(&cwae.t) == EOF &&
+			   (ma = get_macro(cpp, cwae.t.buf)) && FUNCTIONLIKE(ma) && tchain_parens_follows(cpp, rec_level) != -1
+			) {
+				ret = expand_macro(cpp, &cwae.t, out, cwae.t.buf, rec_level+1, visited);
+				if(!ret) return ret;
+			} else
+				emit_token(out, &tok, cwae.t.buf);
 		}
 		free(mcs);
 	}
