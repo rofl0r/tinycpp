@@ -12,6 +12,10 @@ void tokenizer_set_filename(struct tokenizer *t, const char* fn) {
 
 #define ARRAY_SIZE(X) (sizeof(X)/sizeof(X[0]))
 
+off_t tokenizer_ftello(struct tokenizer *t) {
+	return ftello(t->input)-t->getc_buf.buffered;
+}
+
 static int tokenizer_ungetc(struct tokenizer *t, int c)
 {
 	++t->getc_buf.buffered;
