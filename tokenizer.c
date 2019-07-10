@@ -169,6 +169,19 @@ static int is_float_literal(const char *str) {
 	return 0;
 }
 
+static int is_valid_float_until(const char*s, const char* until) {
+	int got_digits = 0, got_dot = 0;
+	while(s < until) {
+		if(isdigit(*s)) got_digits = 1;
+		else if(*s == '.') {
+			if(got_dot) return 0;
+			got_dot = 1;
+		} else return 0;
+		++s;
+	}
+	return got_digits;
+}
+
 static int is_oct_int_literal(const char *s) {
 	if(s[0] == '-') s++;
 	if(s[0] != '0') return 0;
@@ -414,7 +427,8 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 				if(c == '\n') continue;
 				tokenizer_ungetc(t, c);
 				c = '\\';
-			} else if(is_plus_or_minus(c) && s > t->buf+1 && (s[-1] == 'E' || s[-1] == 'e')) {
+			} else if(is_plus_or_minus(c) && s > t->buf+1 &&
+				  (s[-1] == 'E' || s[-1] == 'e') && is_valid_float_until(t->buf, s-1)) {
 				goto process_char;
 			} else if(c == '.' && s != t->buf && (isdigit(s[-1]) || (s == t->buf+1 && is_plus_or_minus(s[-1])))) {
 				goto process_char;
