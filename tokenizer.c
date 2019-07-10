@@ -275,6 +275,12 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out, i
 			*s = 0;
 			return apply_coords(t, out, s, 0);
 		}
+		if(c == '\\') {
+			c = tokenizer_getc(t);
+			if(c == '\n') continue;
+			tokenizer_ungetc(t, c);
+			c = '\\';
+		}
 		if(c == '\n') {
 			if(escaped) {
 				escaped = 0;
