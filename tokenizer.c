@@ -370,6 +370,12 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			continue;
 		}
 		if(is_sep(c)) {
+			if(s != t->buf && c == '\\' && !isspace(s[-1])) {
+				c = tokenizer_getc(t);
+				if(c == '\n') continue;
+				tokenizer_ungetc(t, c);
+				c = '\\';
+			}
 			tokenizer_ungetc(t, c);
 			break;
 		}
