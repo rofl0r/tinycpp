@@ -555,7 +555,23 @@ static int stringify(struct cpp *ccp, struct tokenizer *t, FILE* output) {
 		if(!ret) return ret;
 		if(tok.type == TT_EOF) break;
 		if(is_char(&tok, '\n')) continue;
-		emit_token(output, &tok, t->buf);
+		if(is_char(&tok, '\\') && tokenizer_peek(t) == '\n') continue;
+		if(tok.type == TT_DQSTRING_LIT) {
+			char *s = t->buf;
+			char buf[2] = {0};
+			while(*s) {
+				if(*s == '\"') {
+					emit(output, "\\\"");
+				} else if (*s == '\\') {
+					emit(output, "\\\\");
+				} else {
+					buf[0] = *s;
+					emit(output, buf);
+				}
+				++s;
+			}
+		} else
+			emit_token(output, &tok, t->buf);
 	}
 	emit(output, "\"");
 	return ret;
