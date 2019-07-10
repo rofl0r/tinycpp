@@ -1141,6 +1141,7 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 			}
 			int index = expect(&t, TT_IDENTIFIER, directives, &curr);
 			if(index == -1) {
+				if(skip_conditional_block) continue;
 				error("invalid preprocessing directive", &t, &curr);
 				return 0;
 			}
