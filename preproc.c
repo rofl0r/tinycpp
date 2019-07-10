@@ -970,8 +970,13 @@ static int led(struct tokenizer *t, int left, struct token *tok) {
 		case TT_PLUS: return left +  expr(t, bp(tok->type));
 		case TT_MINUS:return left -  expr(t, bp(tok->type));
 		case TT_MUL:  return left *  expr(t, bp(tok->type));
-		case TT_DIV:  return left /  expr(t, bp(tok->type));
-		case TT_MOD:  return left %  expr(t, bp(tok->type));
+		case TT_DIV:
+		case TT_MOD:
+			right = expr(t, bp(tok->type));
+			if(right == 0) error("eval: div by zero", t, tok);
+			else if(tok->type == TT_DIV) return left / right;
+			else if(tok->type == TT_MOD) return left % right;
+			return 0;
 		default:
 			error("eval: unexpect token", t, tok);
 			return 0;
