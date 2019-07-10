@@ -1235,9 +1235,16 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 				set_level(if_level-1, -1);
 				break;
 			case 11: // line
-			case 12: // pragma
 				ret = tokenizer_read_until(&t, "\n", 1);
 				if(!ret) goto unknown_error;
+				break;
+			case 12: // pragma
+				emit(out, "#pragma");
+				while((ret = x_tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
+					emit_token(out, &curr, t.buf);
+					if(is_char(&curr, '\n')) break;
+				}
+				if(!ret) return ret;
 				break;
 			default:
 				break;
