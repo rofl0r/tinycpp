@@ -8,6 +8,7 @@ struct cpp;
 struct cpp *cpp_new(void);
 void cpp_free(struct cpp*);
 void cpp_add_includedir(struct cpp *cpp, const char* includedir);
+int cpp_add_define(struct cpp *cpp, const char *mdecl);
 int cpp_run(struct cpp *cpp, FILE* in, FILE* out, const char* inname);
 
 #pragma RcB2 DEP "preproc.c"

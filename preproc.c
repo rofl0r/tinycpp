@@ -1308,6 +1308,17 @@ void cpp_add_includedir(struct cpp *cpp, const char* includedir) {
 	tglist_add(&cpp->includedirs, strdup(includedir));
 }
 
+int cpp_add_define(struct cpp *cpp, const char *mdecl) {
+	struct FILE_container tmp = {0};
+	tmp.f = open_memstream(&tmp.buf, &tmp.len);
+	fprintf(tmp.f, "%s\n", mdecl);
+	tmp.f = freopen_r(tmp.f, &tmp.buf, &tmp.len);
+	tokenizer_from_file(&tmp.t, tmp.f);
+	int ret = parse_macro(cpp, &tmp.t);
+	free_file_container(&tmp);
+	return ret;
+}
+
 int cpp_run(struct cpp *cpp, FILE* in, FILE* out, const char* inname) {
 	return parse_file(cpp, in, inname, out);
 }
