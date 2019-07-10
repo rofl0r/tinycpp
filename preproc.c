@@ -198,7 +198,7 @@ static void emit_token(FILE* out, struct token *tok, const char* strbuf) {
 	} else if(strbuf && token_needs_string(tok)) {
 		fprintf(out, "%s", strbuf);
 	} else {
-		dprintf(2, "oops, dunno how to handle\n");
+		dprintf(2, "oops, dunno how to handle tt %d (%s)\n", (int) tok->type, strbuf);
 	}
 }
 
