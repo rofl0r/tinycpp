@@ -123,14 +123,20 @@ static void emit(FILE *out, const char *s) {
 	fprintf(out, "%s", s);
 }
 
-static int x_tokenizer_next(struct tokenizer *t, struct token *tok) {
+static int x_tokenizer_next_of(struct tokenizer *t, struct token *tok, int fail_unk) {
 	int ret = tokenizer_next(t, tok);
-	if(ret == 0) {
+	if(tok->type == TT_OVERFLOW) {
+		error("max token length of 4095 exceeded!", t, tok);
+		return 0;
+	} else if (fail_unk && ret == 0) {
 		error("tokenizer encountered unknown token", t, tok);
-		abort();
+		return 0;
 	}
-	return ret;
+	return 1;
 }
+
+#define tokenizer_next(T, TOK) x_tokenizer_next_of(T, TOK, 0)
+#define x_tokenizer_next(T, TOK) x_tokenizer_next_of(T, TOK, 1)
 
 static int is_whitespace_token(struct token *token)
 {
@@ -378,8 +384,9 @@ static int parse_macro(struct cpp *cpp, struct tokenizer *t) {
 	int backslash_seen = 0;
 	while(1) {
 		/* ignore unknown tokens in macro body */
-		tokenizer_next(t, &curr) && curr.type != TT_EOF;
-
+		ret = tokenizer_next(t, &curr);
+		if(!ret) return 0;
+		if(curr.type == TT_EOF) break;
 		if (curr.type == TT_SEP) {
 			if(curr.value == '\\')
 				backslash_seen = 1;
@@ -551,7 +558,7 @@ static int stringify(struct cpp *ccp, struct tokenizer *t, FILE* output) {
 	struct token tok;
 	emit(output, "\"");
 	while(1) {
-		ret = x_tokenizer_next(t, &tok);
+		ret = tokenizer_next(t, &tok);
 		if(!ret) return ret;
 		if(tok.type == TT_EOF) break;
 		if(is_char(&tok, '\n')) continue;
@@ -715,7 +722,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 	int ws_count = 0;
 	while(1) {
 		int ret;
-		tokenizer_next(&t2, &tok);
+		ret = tokenizer_next(&t2, &tok);
+		if(!ret) return 0;
 		if(tok.type == TT_EOF) break;
 		if(tok.type == TT_IDENTIFIER) {
 			flush_whitespace(output, &ws_count);
@@ -787,7 +795,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		tokenizer_from_file(&cwae.t, cwae.f);
 		size_t mac_cnt = 0;
 		while(1) {
-			tokenizer_next(&cwae.t, &tok);
+			int ret = tokenizer_next(&cwae.t, &tok);
+			if(!ret) return ret;
 			if(tok.type == TT_EOF) break;
 			if(tok.type == TT_IDENTIFIER && get_macro(cpp, cwae.t.buf))
 				++mac_cnt;
@@ -1171,10 +1180,11 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 
 	const char *macro_name = 0;
 	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "else", "ifdef", "ifndef", "endif", "line", "pragma", 0};
-	while((ret = tokenizer_next(&t, &curr)) || 1 && curr.type != TT_EOF) {
+	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
 		newline = curr.column == 0;
 		if(newline) {
 			ret = eat_whitespace(&t, &curr, &ws_count);
+			if(!ret) return ret;
 		}
 		if(curr.type == TT_EOF) break;
 		if(skip_conditional_block && !(newline && is_char(&curr, '#'))) continue;
