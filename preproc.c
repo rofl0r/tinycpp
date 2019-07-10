@@ -6,11 +6,14 @@
 #include "tglist.h"
 #include "hbmap.h"
 
-#define MACRO_FLAG_OBJECTLIKE 1U<<31
-#define MACRO_ARGCOUNT_MASK ~(0|(MACRO_FLAG_OBJECTLIKE))
+#define MACRO_FLAG_OBJECTLIKE (1U<<31)
+#define MACRO_FLAG_VARIADIC (1U<<30)
+#define MACRO_ARGCOUNT_MASK (~(0|MACRO_FLAG_OBJECTLIKE|MACRO_FLAG_VARIADIC))
 
 #define OBJECTLIKE(M) (M->num_args & MACRO_FLAG_OBJECTLIKE)
 #define FUNCTIONLIKE(M) (!(OBJECTLIKE(M)))
+#define MACRO_ARGCOUNT(M) (M->num_args & MACRO_ARGCOUNT_MASK)
+#define MACRO_VARIADIC(M) (M->num_args & MACRO_FLAG_VARIADIC)
 
 #define MAX_RECURSION 32
 
@@ -337,11 +340,18 @@ static int parse_macro(struct cpp *cpp, struct tokenizer *t) {
 					error("unexpected character", t, &curr);
 					return 0;
 				}
-			} else if(curr.type != TT_IDENTIFIER) {
+			} else if(!(curr.type == TT_IDENTIFIER || curr.type == TT_ELLIPSIS)) {
 				error("expected identifier for macro arg", t, &curr);
 				return 0;
 			}
 			{
+				if(curr.type == TT_ELLIPSIS) {
+					if(macro_flags & MACRO_FLAG_VARIADIC) {
+						error("\"...\" isn't the last parameter", t, &curr);
+						return 0;
+					}
+					macro_flags |= MACRO_FLAG_VARIADIC;
+				}
 				char *tmps = strdup(t->buf);
 				tglist_add(&new.argnames, tmps);
 			}
@@ -579,8 +589,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 
 	size_t i;
 	struct token tok;
-	unsigned num_args = m->num_args & MACRO_ARGCOUNT_MASK;
-	struct FILE_container *argvalues = calloc(num_args, sizeof(struct FILE_container));
+	unsigned num_args = MACRO_ARGCOUNT(m);
+	struct FILE_container *argvalues = calloc(MACRO_VARIADIC(m) ? num_args + 1 : num_args, sizeof(struct FILE_container));
 
 	for(i=0; i < num_args; i++)
 		argvalues[i].f = open_memstream(&argvalues[i].buf, &argvalues[i].len);
@@ -604,6 +614,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		unsigned curr_arg = 0, need_arg = 1, parens = 0, ws_count;
 		if(!tokenizer_skip_chars(t, " \t", &ws_count)) return 0;
 
+		int varargs = 0;
+		if(num_args == 1 && MACRO_VARIADIC(m)) varargs = 1;
 		while(1) {
 			int ret = x_tokenizer_next(t, &tok);
 			if(!ret) return 0;
@@ -611,13 +623,15 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 				dprintf(2, "warning EOF\n");
 				break;
 			}
-			if(!parens && is_char(&tok, ',')) {
+			if(!parens && is_char(&tok, ',') && !varargs) {
 				if(need_arg && !ws_count) {
 					/* empty argument is OK */
 				}
 				need_arg = 1;
-				curr_arg++;
-				if(curr_arg >= num_args) {
+				if(!varargs) curr_arg++;
+				if(curr_arg + 1 == num_args && MACRO_VARIADIC(m)) {
+					varargs = 1;
+				} else if(curr_arg >= num_args) {
 					error("too many arguments for function macro", t, &tok);
 					return 0;
 				}
@@ -628,7 +642,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 				++parens;
 			} else if(is_char(&tok, ')')) {
 				if(!parens) {
-					if(curr_arg + num_args && curr_arg != num_args-1) {
+					if(curr_arg + num_args && curr_arg < num_args-1) {
 						error("too few args for function macro", t, &tok);
 						return 0;
 					}
@@ -672,7 +686,11 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		if(tok.type == TT_EOF) break;
 		if(tok.type == TT_IDENTIFIER) {
 			flush_whitespace(output, &ws_count);
-			size_t arg_nr = macro_arglist_pos(m, t2.buf), j;
+			char *id = t2.buf;
+			if(MACRO_VARIADIC(m) && !strcmp(t2.buf, "__VA_ARGS__")) {
+				id = "...";
+			}
+			size_t arg_nr = macro_arglist_pos(m, id), j;
 			if(arg_nr != (size_t) -1) {
 				if(hash_count == 1)
 					emit(output, "\"");
