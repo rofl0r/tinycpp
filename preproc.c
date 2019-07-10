@@ -53,6 +53,7 @@ static int token_needs_string(struct token *tok) {
                 case TT_OCT_INT_LIT:
                 case TT_DEC_INT_LIT:
 		case TT_FLOAT_LIT:
+		case TT_UNKNOWN:
 			return 1;
 		default:
 			return 0;
@@ -125,7 +126,7 @@ static void emit(FILE *out, const char *s) {
 static int x_tokenizer_next(struct tokenizer *t, struct token *tok) {
 	int ret = tokenizer_next(t, tok);
 	if(ret == 0) {
-		error("unexpected tokenizer error", t, tok);
+		error("tokenizer encountered unknown token", t, tok);
 		abort();
 	}
 	return ret;
@@ -376,8 +377,8 @@ static int parse_macro(struct cpp *cpp, struct tokenizer *t) {
 
 	int backslash_seen = 0;
 	while(1) {
-		ret = x_tokenizer_next(t, &curr) && curr.type != TT_EOF;
-		if(!ret) return ret;
+		/* ignore unknown tokens in macro body */
+		tokenizer_next(t, &curr) && curr.type != TT_EOF;
 
 		if (curr.type == TT_SEP) {
 			if(curr.value == '\\')
@@ -682,8 +683,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 	int hash_count = 0;
 	int ws_count = 0;
 	while(1) {
-		int ret = x_tokenizer_next(&t2, &tok);
-		if(!ret) return ret;
+		int ret;
+		tokenizer_next(&t2, &tok);
 		if(tok.type == TT_EOF) break;
 		if(tok.type == TT_IDENTIFIER) {
 			flush_whitespace(output, &ws_count);
@@ -759,8 +760,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		tokenizer_from_file(&cwae.t, cwae.f);
 		size_t mac_cnt = 0;
 		while(1) {
-			int ret = x_tokenizer_next(&cwae.t, &tok);
-			if(!ret || tok.type == TT_EOF) break;
+			tokenizer_next(&cwae.t, &tok);
+			if(tok.type == TT_EOF) break;
 			if(tok.type == TT_IDENTIFIER && get_macro(cpp, cwae.t.buf))
 				++mac_cnt;
 		}
@@ -825,14 +826,13 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		}
 		tokenizer_rewind(&cwae.t);
 		while(1) {
-			int ret = x_tokenizer_next(&cwae.t, &tok);
 			struct macro *ma;
-			if(!ret) return ret;
+			tokenizer_next(&cwae.t, &tok);
 			if(tok.type == TT_EOF) break;
 			if(tok.type == TT_IDENTIFIER && tokenizer_peek(&cwae.t) == EOF &&
 			   (ma = get_macro(cpp, cwae.t.buf)) && FUNCTIONLIKE(ma) && tchain_parens_follows(cpp, rec_level) != -1
 			) {
-				ret = expand_macro(cpp, &cwae.t, out, cwae.t.buf, rec_level+1, visited);
+				int ret = expand_macro(cpp, &cwae.t, out, cwae.t.buf, rec_level+1, visited);
 				if(!ret) return ret;
 			} else
 				emit_token(out, &tok, cwae.t.buf);
