@@ -224,6 +224,10 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out, i
 			return apply_coords(t, out, s, 0);
 		}
 		if(c == '\n') {
+			if(escaped) {
+				escaped = 0;
+				continue;
+			}
 			out->type = TT_UNKNOWN;
 			s = assign_bufchar(t, s, 0);
 			return apply_coords(t, out, s, 0);
