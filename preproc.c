@@ -546,6 +546,21 @@ static int tchain_parens_follows(struct cpp *cpp, int rec_level) {
 	return -1;
 }
 
+static int stringify(struct cpp *ccp, struct tokenizer *t, FILE* output) {
+	int ret = 1;
+	struct token tok;
+	emit(output, "\"");
+	while(1) {
+		ret = x_tokenizer_next(t, &tok);
+		if(!ret) return ret;
+		if(tok.type == TT_EOF) break;
+		if(is_char(&tok, '\n')) continue;
+		emit_token(output, &tok, t->buf);
+	}
+	emit(output, "\"");
+	return ret;
+}
+
 /* rec_level -1 serves as a magic value to signal we're using
    expand_macro from the if-evaluator code, which means activating
    the "define" macro */
@@ -694,18 +709,14 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 			}
 			size_t arg_nr = macro_arglist_pos(m, id), j;
 			if(arg_nr != (size_t) -1) {
-				if(hash_count == 1)
-					emit(output, "\"");
 				tokenizer_rewind(&argvalues[arg_nr].t);
-				while(1) {
+				if(hash_count == 1) ret = stringify(cpp, &argvalues[arg_nr].t, output);
+				else while(1) {
 					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
 					if(!ret) return ret;
 					if(tok.type == TT_EOF) break;
-					if(hash_count == 1 && is_char(&tok, '\n')) continue;
 					emit_token(output, &tok, argvalues[arg_nr].t.buf);
 				}
-				if(hash_count == 1)
-					emit(output, "\"");
 				hash_count = 0;
 			} else {
 				if(hash_count == 1) {
