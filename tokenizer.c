@@ -409,13 +409,6 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 				if(c == '\n') continue;
 				tokenizer_ungetc(t, c);
 				c = '\\';
-			} else if (s == t->buf && is_plus_or_minus(c)) {
-				int save = c, jump = 0;
-				c = tokenizer_getc(t);
-				if(isdigit(c) || c == '.') jump = 1;
-				tokenizer_ungetc(t, c);
-				c = save;
-				if(jump) goto process_char;
 			} else if(is_plus_or_minus(c) && s > t->buf+1 && (s[-1] == 'E' || s[-1] == 'e')) {
 				goto process_char;
 			} else if(c == '.' && s != t->buf && (isdigit(s[-1]) || (s == t->buf+1 && is_plus_or_minus(s[-1])))) {
