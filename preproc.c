@@ -699,6 +699,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
 					if(!ret) return ret;
 					if(tok.type == TT_EOF) break;
+					if(hash_count == 1 && is_char(&tok, '\n')) continue;
 					emit_token(output, &tok, argvalues[arg_nr].t.buf);
 				}
 				if(hash_count == 1)
