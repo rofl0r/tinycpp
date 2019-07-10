@@ -634,7 +634,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		if((ret = tokenizer_peek(t)) != '(') {
 			/* function-like macro shall not be expanded if not followed by '(' */
 			if(ret == EOF && rec_level > 0 && (ret = tchain_parens_follows(cpp, rec_level-1)) != -1) {
-				warning("Replacement text involved subsequent text", t, 0);
+				// warning("Replacement text involved subsequent text", t, 0);
 				t = cpp->tchain[ret];
 			} else {
 				emit(out, name);
