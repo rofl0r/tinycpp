@@ -121,16 +121,20 @@ static int is_hex_int_literal(const char *s) {
 	return 0;
 }
 
+static int is_plus_or_minus(int c) {
+	return c == '-' || c == '+';
+}
+
 static int is_dec_int_literal(const char *str) {
 	const char *s = str;
-	if(s[0] == '-') s++;
+	if(is_plus_or_minus(s[0])) s++;
 	if(s[0] == '0') {
 		if(s[1] == 0) return 1;
 		if(isdigit(s[1])) return 0;
 	}
 	while(*s) {
 		if(!isdigit(*s))
-			if(s > str && (str[0] == '-' ? s > str+1 : 1)) return has_ul_tail(s);
+			if(s > str && (is_plus_or_minus(str[0]) ? s > str+1 : 1)) return has_ul_tail(s);
 			else return 0;
 		s++;
 	}
@@ -375,6 +379,13 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 				if(c == '\n') continue;
 				tokenizer_ungetc(t, c);
 				c = '\\';
+			} else if (s == t->buf && is_plus_or_minus(c)) {
+				int save = c, jump = 0;
+				c = tokenizer_getc(t);
+				if(isdigit(c)) jump = 1;
+				tokenizer_ungetc(t, c);
+				c = save;
+				if(jump) goto process_char;
 			}
 			tokenizer_ungetc(t, c);
 			break;
@@ -386,6 +397,7 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			if(c == '\'' || c == '\"') break;
 		}
 
+process_char:;
 		s = assign_bufchar(t, s, c);
 		if(t->column + 1 >= MAX_TOK_LEN) {
 			out->type = TT_OVERFLOW;
