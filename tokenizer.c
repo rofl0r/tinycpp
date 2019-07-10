@@ -71,6 +71,7 @@ const char* tokentype_to_str(enum tokentype tt) {
 		case TT_HEX_INT_LIT: return "hexint";
 		case TT_OCT_INT_LIT: return "octint";
 		case TT_DEC_INT_LIT: return "decint";
+		case TT_FLOAT_LIT: return "float";
 		case TT_SEP: return "separator";
 		case TT_UNKNOWN: return "unknown";
 		case TT_OVERFLOW: return "overflow";
@@ -140,6 +141,34 @@ static int is_dec_int_literal(const char *str) {
 	}
 	return 1;
 }
+
+static int is_float_literal(const char *str) {
+	const char *s = str;
+	if(is_plus_or_minus(s[0])) s++;
+	int got_dot = 0, got_e = 0, got_digits = 0;
+	while(*s) {
+		int l = tolower(*s);
+		if(*s == '.') {
+			if(got_dot) return 0;
+			got_dot = 1;
+		} else if(l == 'f') {
+			if(s[1] == 0 && (got_dot || got_e) && got_digits) return 1;
+			return 0;
+		} else if (isdigit(*s)) {
+			got_digits = 1;
+		} else if(l == 'e') {
+			if(!got_digits) return 0;
+			s++;
+			if(is_plus_or_minus(*s)) s++;
+			if(!isdigit(*s)) return 0;
+			got_e = 1;
+		} else return 0;
+		s++;
+	}
+	if(got_digits && (got_e || got_dot)) return 1;
+	return 0;
+}
+
 static int is_oct_int_literal(const char *s) {
 	if(s[0] == '-') s++;
 	if(s[0] != '0') return 0;
@@ -185,6 +214,7 @@ static enum tokentype categorize(const char *s) {
 	if(is_hex_int_literal(s)) return TT_HEX_INT_LIT;
 	if(is_dec_int_literal(s)) return TT_DEC_INT_LIT;
 	if(is_oct_int_literal(s)) return TT_OCT_INT_LIT;
+	if(is_float_literal(s)) return TT_FLOAT_LIT;
 	if(is_identifier(s)) return TT_IDENTIFIER;
 	return TT_UNKNOWN;
 }
@@ -382,9 +412,20 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			} else if (s == t->buf && is_plus_or_minus(c)) {
 				int save = c, jump = 0;
 				c = tokenizer_getc(t);
-				if(isdigit(c)) jump = 1;
+				if(isdigit(c) || c == '.') jump = 1;
 				tokenizer_ungetc(t, c);
 				c = save;
+				if(jump) goto process_char;
+			} else if(is_plus_or_minus(c) && s > t->buf+1 && (s[-1] == 'E' || s[-1] == 'e')) {
+				goto process_char;
+			} else if(c == '.' && s != t->buf && (isdigit(s[-1]) || (s == t->buf+1 && is_plus_or_minus(s[-1])))) {
+				goto process_char;
+			} else if(c == '.' && s == t->buf) {
+				int jump = 0;
+				c = tokenizer_getc(t);
+				if(isdigit(c)) jump = 1;
+				tokenizer_ungetc(t, c);
+				c = '.';
 				if(jump) goto process_char;
 			}
 			tokenizer_ungetc(t, c);

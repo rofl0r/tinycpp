@@ -30,6 +30,7 @@ enum tokentype {
 	TT_HEX_INT_LIT,
 	TT_OCT_INT_LIT,
 	TT_DEC_INT_LIT,
+	TT_FLOAT_LIT,
 	TT_SEP,
 	/* errors and similar */
 	TT_UNKNOWN,
