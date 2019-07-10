@@ -906,7 +906,7 @@ static int bp(int tokentype) {
 	return 0;
 }
 
-static int expr(struct tokenizer *t, int rbp);
+static int expr(struct tokenizer *t, int rbp, int *err);
 
 static int charlit_to_int(const char *lit) {
 	if(lit[1] == '\\') switch(lit[2]) {
@@ -920,7 +920,7 @@ static int charlit_to_int(const char *lit) {
 	return lit[1];
 }
 
-static int nud(struct tokenizer *t, struct token *tok) {
+static int nud(struct tokenizer *t, struct token *tok, int *err) {
 	switch(tok->type) {
 		case TT_IDENTIFIER: return 0;
 		case TT_WIDECHAR_LIT:
@@ -929,12 +929,12 @@ static int nud(struct tokenizer *t, struct token *tok) {
 		case TT_OCT_INT_LIT:
 		case TT_DEC_INT_LIT:
 			return strtol(t->buf, NULL, 0);
-		case TT_NEG:   return ~ expr(t, bp(tok->type));
-		case TT_PLUS:  return expr(t, bp(tok->type));
-		case TT_MINUS: return - expr(t, bp(tok->type));
-		case TT_LNOT:  return !expr(t, bp(tok->type));
+		case TT_NEG:   return ~ expr(t, bp(tok->type), err);
+		case TT_PLUS:  return expr(t, bp(tok->type), err);
+		case TT_MINUS: return - expr(t, bp(tok->type), err);
+		case TT_LNOT:  return !expr(t, bp(tok->type), err);
 		case TT_LPAREN: {
-			int inner = expr(t, 0);
+			int inner = expr(t, 0, err);
 			if(0!=expect(t, TT_RPAREN, (const char*[]){")", 0}, tok)) {
 				error("missing ')'", t, tok);
 				return 0;
@@ -944,41 +944,46 @@ static int nud(struct tokenizer *t, struct token *tok) {
 		case TT_RPAREN:
 		default:
 			error("unexpected token", t, tok);
+			*err = 1;
 			return 0;
 	}
 }
 
-static int led(struct tokenizer *t, int left, struct token *tok) {
+static int led(struct tokenizer *t, int left, struct token *tok, int *err) {
 	int right;
 	switch(tok->type) {
 		case TT_LAND:
 		case TT_LOR:
-			right = expr(t, bp(tok->type));
+			right = expr(t, bp(tok->type), err);
 			if(tok->type == TT_LAND) return left && right;
 			return left || right;
-		case TT_LTE:  return left <= expr(t, bp(tok->type));
-		case TT_GTE:  return left >= expr(t, bp(tok->type));
-		case TT_SHL:  return left << expr(t, bp(tok->type));
-		case TT_SHR:  return left >> expr(t, bp(tok->type));
-		case TT_EQ:   return left == expr(t, bp(tok->type));
-		case TT_NEQ:  return left != expr(t, bp(tok->type));
-		case TT_LT:   return left <  expr(t, bp(tok->type));
-		case TT_GT:   return left >  expr(t, bp(tok->type));
-		case TT_BAND: return left &  expr(t, bp(tok->type));
-		case TT_BOR:  return left |  expr(t, bp(tok->type));
-		case TT_XOR:  return left ^  expr(t, bp(tok->type));
-		case TT_PLUS: return left +  expr(t, bp(tok->type));
-		case TT_MINUS:return left -  expr(t, bp(tok->type));
-		case TT_MUL:  return left *  expr(t, bp(tok->type));
+		case TT_LTE:  return left <= expr(t, bp(tok->type), err);
+		case TT_GTE:  return left >= expr(t, bp(tok->type), err);
+		case TT_SHL:  return left << expr(t, bp(tok->type), err);
+		case TT_SHR:  return left >> expr(t, bp(tok->type), err);
+		case TT_EQ:   return left == expr(t, bp(tok->type), err);
+		case TT_NEQ:  return left != expr(t, bp(tok->type), err);
+		case TT_LT:   return left <  expr(t, bp(tok->type), err);
+		case TT_GT:   return left >  expr(t, bp(tok->type), err);
+		case TT_BAND: return left &  expr(t, bp(tok->type), err);
+		case TT_BOR:  return left |  expr(t, bp(tok->type), err);
+		case TT_XOR:  return left ^  expr(t, bp(tok->type), err);
+		case TT_PLUS: return left +  expr(t, bp(tok->type), err);
+		case TT_MINUS:return left -  expr(t, bp(tok->type), err);
+		case TT_MUL:  return left *  expr(t, bp(tok->type), err);
 		case TT_DIV:
 		case TT_MOD:
-			right = expr(t, bp(tok->type));
-			if(right == 0) error("eval: div by zero", t, tok);
+			right = expr(t, bp(tok->type), err);
+			if(right == 0)  {
+				error("eval: div by zero", t, tok);
+				*err = 1;
+			}
 			else if(tok->type == TT_DIV) return left / right;
 			else if(tok->type == TT_MOD) return left % right;
 			return 0;
 		default:
 			error("eval: unexpect token", t, tok);
+			*err = 1;
 			return 0;
 	}
 }
@@ -996,17 +1001,17 @@ static int tokenizer_peek_next_non_ws(struct tokenizer *t, struct token *tok)
 	return ret;
 }
 
-static int expr(struct tokenizer *t, int rbp) {
+static int expr(struct tokenizer *t, int rbp, int*err) {
 	struct token tok;
 	int ret = skip_next_and_ws(t, &tok);
 	if(tok.type == TT_EOF) return 0;
-	int left = nud(t, &tok);
+	int left = nud(t, &tok, err);
 	while(1) {
 		ret = tokenizer_peek_next_non_ws(t, &tok);
 		if(bp(tok.type) <= rbp) break;
 		ret = tokenizer_next(t, &tok);
 		if(tok.type == TT_EOF) break;
-		left = led(t, left, &tok);
+		left = led(t, left, &tok, err);
 	}
 	return left;
 }
@@ -1039,11 +1044,12 @@ static int do_eval(struct tokenizer *t, int *result) {
 	tokenizer_register_custom_token(t, TT_RPAREN, ")");
 	tokenizer_register_custom_token(t, TT_LNOT, "!");
 
-	*result = expr(t, 0);
+	int err = 0;
+	*result = expr(t, 0, &err);
 #ifdef DEBUG
 	dprintf(2, "eval result: %d\n", *result);
 #endif
-	return 1;
+	return !err;
 }
 
 static int evaluate_condition(struct cpp *cpp, struct tokenizer *t, int *result, char *visited[]) {
