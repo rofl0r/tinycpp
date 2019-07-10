@@ -170,7 +170,7 @@ static int is_identifier(const char *s) {
 	['x'] = 1, ['y'] = 1, ['z'] = 1,
 	};
 	if((*s) & 128) return 0;
-	if(!ascmap[*s] == 1) return 0;
+	if(ascmap[*s] != 1) return 0;
 	++s;
 	while(*s) {
 		if((*s) & 128) return 0;
