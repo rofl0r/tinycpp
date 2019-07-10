@@ -146,10 +146,6 @@ static int is_oct_int_literal(const char *s) {
 	return 1;
 }
 
-static int is_ellipsis(const char *s) {
-	return !strcmp(s, "...");
-}
-
 static int is_identifier(const char *s) {
 	static const char ascmap[128] = {
 	['0'] = 2, ['1'] = 2, ['2'] = 2, ['3'] = 2,
@@ -182,7 +178,6 @@ static int is_identifier(const char *s) {
 }
 
 static enum tokentype categorize(const char *s) {
-	if(is_ellipsis(s)) return TT_ELLIPSIS;
 	if(is_hex_int_literal(s)) return TT_HEX_INT_LIT;
 	if(is_dec_int_literal(s)) return TT_DEC_INT_LIT;
 	if(is_oct_int_literal(s)) return TT_OCT_INT_LIT;
@@ -400,6 +395,10 @@ int tokenizer_next(struct tokenizer *t, struct token* out) {
 			assert(c == '\'' || c == '\"');
 			wide = 1;
 			goto string_handling;
+		} else if (c == '.' && sequence_follows(t, c, "...")) {
+			strcpy(t->buf, "...");
+			out->type = TT_ELLIPSIS;
+			return apply_coords(t, out, s+3, 1);
 		}
 
 		{
