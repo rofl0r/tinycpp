@@ -238,6 +238,10 @@ static int apply_coords(struct tokenizer *t, struct token* out, char *end, int r
 	out->line = t->line;
 	uintptr_t len = end - t->buf;
 	out->column = t->column - len;
+	if(len + 1 >= t->bufsize) {
+		out->type = TT_OVERFLOW;
+		return 0;
+	}
 	return retval;
 }
 
@@ -250,7 +254,8 @@ static inline char *assign_bufchar(struct tokenizer *t, char *s, int c) {
 static int get_string(struct tokenizer *t, char quote_char, struct token* out, int wide) {
 	char *s = t->buf+1;
 	int escaped = 0;
-	while((uintptr_t)s < (uintptr_t)t->buf + MAX_TOK_LEN + 2) {
+	char *end = t->buf + t->bufsize - 2;
+	while(s < end) {
 		int c = tokenizer_getc(t);
 		if(c == EOF) {
 			out->type = TT_EOF;
@@ -503,7 +508,7 @@ int tokenizer_get_flags(struct tokenizer *t) {
 }
 
 void tokenizer_init(struct tokenizer *t, FILE* in, int flags) {
-	*t = (struct tokenizer){ .input = in, .line = 1, .flags = flags };
+	*t = (struct tokenizer){ .input = in, .line = 1, .flags = flags, .bufsize = MAX_TOK_LEN};
 }
 
 void tokenizer_register_marker(struct tokenizer *t, enum markertype mt, const char* marker)
@@ -515,6 +520,7 @@ int tokenizer_rewind(struct tokenizer *t) {
 	FILE *f = t->input;
 	int flags = t->flags;
 	const char* fn = t->filename;
-	*t = (struct tokenizer){.input = f, .flags = flags, .filename = fn};
+	tokenizer_init(t, f, flags);
+	tokenizer_set_filename(t, fn);
 	return fseek(f, 0, SEEK_SET) == 0;
 }

@@ -64,6 +64,7 @@ struct tokenizer {
 	int peeking;
 	const char *custom_tokens[MAX_CUSTOM_TOKENS];
 	char buf[MAX_TOK_LEN];
+	size_t bufsize;
 	struct tokenizer_getc_buf getc_buf;
 	const char* marker[MT_MAX+1];
 	const char* filename;
