@@ -1144,12 +1144,12 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 
 	const char *macro_name = 0;
 	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "else", "ifdef", "ifndef", "endif", "line", "pragma", 0};
-	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
+	while((ret = tokenizer_next(&t, &curr)) || 1 && curr.type != TT_EOF) {
 		newline = curr.column == 0;
 		if(newline) {
 			ret = eat_whitespace(&t, &curr, &ws_count);
 		}
-		if(!ret || curr.type == TT_EOF) break;
+		if(curr.type == TT_EOF) break;
 		if(skip_conditional_block && !(newline && is_char(&curr, '#'))) continue;
 		if(is_char(&curr, '#')) {
 			if(!newline) {
@@ -1242,7 +1242,10 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 				break;
 			case 11: // line
 				ret = tokenizer_read_until(&t, "\n", 1);
-				if(!ret) goto unknown_error;
+				if(!ret) {
+					error("unknown", &t, &curr);
+					return 0;
+				}
 				break;
 			case 12: // pragma
 				emit(out, "#pragma");
@@ -1278,15 +1281,11 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 			emit_token(out, &curr, t.buf);
 		}
 	}
-	if(!ret) {
-unknown_error:
-		error("unknown", &t, &curr);
-	}
 	if(if_level) {
 		error("unterminated #if", &t, &curr);
 		return 0;
 	}
-	return ret;
+	return 1;
 }
 
 struct cpp * cpp_new(void) {
