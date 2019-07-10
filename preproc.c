@@ -52,6 +52,7 @@ static int token_needs_string(struct token *tok) {
                 case TT_HEX_INT_LIT:
                 case TT_OCT_INT_LIT:
                 case TT_DEC_INT_LIT:
+		case TT_FLOAT_LIT:
 			return 1;
 		default:
 			return 0;
@@ -942,6 +943,10 @@ static int nud(struct tokenizer *t, struct token *tok, int *err) {
 			}
 			return inner;
 		}
+		case TT_FLOAT_LIT:
+			error("floating constant in preprocessor expression", t, tok);
+			*err = 1;
+			return 0;
 		case TT_RPAREN:
 		default:
 			error("unexpected token", t, tok);
