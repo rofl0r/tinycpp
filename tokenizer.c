@@ -286,6 +286,7 @@ static int get_string(struct tokenizer *t, char quote_char, struct token* out, i
 				escaped = 0;
 				continue;
 			}
+			tokenizer_ungetc(t, c);
 			out->type = TT_UNKNOWN;
 			s = assign_bufchar(t, s, 0);
 			return apply_coords(t, out, s, 0);
