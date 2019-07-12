@@ -689,6 +689,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 					break;
 				}
 				--parens;
+			} else if(is_char(&tok, '\\')) {
+				if(tokenizer_peek(t) == '\n') continue;
 			}
 			need_arg = 0;
 			emit_token(argvalues[curr_arg].f, &tok, t->buf);
