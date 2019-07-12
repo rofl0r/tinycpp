@@ -86,6 +86,9 @@ int tokenizer_skip_chars(struct tokenizer *t, const char *chars, int *count);
 int tokenizer_read_until(struct tokenizer *t, const char* marker, int stop_at_nl);
 int tokenizer_rewind(struct tokenizer *t);
 
+#ifdef __GNUC__
+#pragma GCC diagnostic ignored "-Wunknown-pragmas"
+#endif
 #pragma RcB2 DEP "tokenizer.c"
 
 #endif
