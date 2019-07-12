@@ -193,7 +193,7 @@ static int eat_whitespace(struct tokenizer *t, struct token *token, int *count) 
 static int skip_next_and_ws(struct tokenizer *t, struct token *tok) {
 	int ret = tokenizer_next(t, tok);
 	if(!ret) return ret;
-	unsigned ws_count;
+	int ws_count;
 	ret = eat_whitespace(t, tok, &ws_count);
 	return ret;
 }
@@ -651,7 +651,8 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		ret = x_tokenizer_next(t, &tok);
 		assert(ret && is_char(&tok, '('));
 
-		unsigned curr_arg = 0, need_arg = 1, parens = 0, ws_count;
+		unsigned curr_arg = 0, need_arg = 1, parens = 0;
+		int ws_count;
 		if(!tokenizer_skip_chars(t, " \t", &ws_count)) return 0;
 
 		int varargs = 0;
