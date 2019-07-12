@@ -488,7 +488,7 @@ process_char:;
 			int i;
 			for(i = 0; i < t->custom_count; i++)
 				if(sequence_follows(t, c, t->custom_tokens[i])) {
-					char *p = t->custom_tokens[i];
+					const char *p = t->custom_tokens[i];
 					while(*p) {
 						s = assign_bufchar(t, s, *p);
 						p++;
