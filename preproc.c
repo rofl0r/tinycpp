@@ -1180,7 +1180,6 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 	} while(0)
 #define skip_conditional_block (if_level > if_level_active)
 
-	const char *macro_name = 0;
 	static const char* directives[] = {"include", "error", "warning", "define", "undef", "if", "elif", "else", "ifdef", "ifndef", "endif", "line", "pragma", 0};
 	while((ret = tokenizer_next(&t, &curr)) && curr.type != TT_EOF) {
 		newline = curr.column == 0;
