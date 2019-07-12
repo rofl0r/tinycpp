@@ -961,7 +961,7 @@ static int charlit_to_int(const char *lit) {
 }
 
 static int nud(struct tokenizer *t, struct token *tok, int *err) {
-	switch(tok->type) {
+	switch((unsigned) tok->type) {
 		case TT_IDENTIFIER: return 0;
 		case TT_WIDECHAR_LIT:
 		case TT_SQSTRING_LIT:  return charlit_to_int(t->buf);
@@ -995,7 +995,7 @@ static int nud(struct tokenizer *t, struct token *tok, int *err) {
 
 static int led(struct tokenizer *t, int left, struct token *tok, int *err) {
 	int right;
-	switch(tok->type) {
+	switch((unsigned) tok->type) {
 		case TT_LAND:
 		case TT_LOR:
 			right = expr(t, bp(tok->type), err);
