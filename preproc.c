@@ -733,7 +733,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 			if(MACRO_VARIADIC(m) && !strcmp(t2.buf, "__VA_ARGS__")) {
 				id = "...";
 			}
-			size_t arg_nr = macro_arglist_pos(m, id), j;
+			size_t arg_nr = macro_arglist_pos(m, id);
 			if(arg_nr != (size_t) -1) {
 				tokenizer_rewind(&argvalues[arg_nr].t);
 				if(hash_count == 1) ret = stringify(cpp, &argvalues[arg_nr].t, output);
