@@ -1058,6 +1058,7 @@ static int expr(struct tokenizer *t, int rbp, int*err) {
 		if(tok.type == TT_EOF) break;
 		left = led(t, left, &tok, err);
 	}
+	(void) ret;
 	return left;
 }
 
