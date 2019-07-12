@@ -61,7 +61,7 @@ void tokenizer_register_custom_token(struct tokenizer*t, int tokentype, const ch
 }
 
 const char* tokentype_to_str(enum tokentype tt) {
-	switch(tt) {
+	switch((unsigned) tt) {
 		case TT_IDENTIFIER: return "iden";
 		case TT_WIDECHAR_LIT: return "widechar";
 		case TT_WIDESTRING_LIT: return "widestring";
@@ -134,9 +134,10 @@ static int is_dec_int_literal(const char *str) {
 		if(isdigit(s[1])) return 0;
 	}
 	while(*s) {
-		if(!isdigit(*s))
+		if(!isdigit(*s)) {
 			if(s > str && (is_plus_or_minus(str[0]) ? s > str+1 : 1)) return has_ul_tail(s);
 			else return 0;
+		}
 		s++;
 	}
 	return 1;
@@ -212,11 +213,11 @@ static int is_identifier(const char *s) {
 	['x'] = 1, ['y'] = 1, ['z'] = 1,
 	};
 	if((*s) & 128) return 0;
-	if(ascmap[*s] != 1) return 0;
+	if(ascmap[(unsigned) *s] != 1) return 0;
 	++s;
 	while(*s) {
 		if((*s) & 128) return 0;
-		if(!ascmap[*s])
+		if(!ascmap[(unsigned) *s])
 			return 0;
 		s++;
 	}
