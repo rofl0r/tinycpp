@@ -658,7 +658,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 		int varargs = 0;
 		if(num_args == 1 && MACRO_VARIADIC(m)) varargs = 1;
 		while(1) {
-			int ret = x_tokenizer_next(t, &tok);
+			int ret = tokenizer_next(t, &tok);
 			if(!ret) return 0;
 			if( tok.type == TT_EOF) {
 				dprintf(2, "warning EOF\n");
@@ -739,7 +739,7 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 				tokenizer_rewind(&argvalues[arg_nr].t);
 				if(hash_count == 1) ret = stringify(cpp, &argvalues[arg_nr].t, output);
 				else while(1) {
-					ret = x_tokenizer_next(&argvalues[arg_nr].t, &tok);
+					ret = tokenizer_next(&argvalues[arg_nr].t, &tok);
 					if(!ret) return ret;
 					if(tok.type == TT_EOF) break;
 					emit_token(output, &tok, argvalues[arg_nr].t.buf);
