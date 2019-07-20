@@ -1306,11 +1306,11 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 			}
 		}
 #if DEBUG
-		dprintf(1, "(stdin:%u,%u) ", curr.line, curr.column);
+		dprintf(2, "(stdin:%u,%u) ", curr.line, curr.column);
 		if(curr.type == TT_SEP)
-			dprintf(1, "separator: %c\n", curr.value == '\n'? ' ' : curr.value);
+			dprintf(2, "separator: %c\n", curr.value == '\n'? ' ' : curr.value);
 		else
-			dprintf(1, "%s: %s\n", tokentype_to_str(curr.type), t.buf);
+			dprintf(2, "%s: %s\n", tokentype_to_str(curr.type), t.buf);
 #endif
 		if(curr.type == TT_IDENTIFIER) {
 			char* visited[MAX_RECURSION] = {0};
