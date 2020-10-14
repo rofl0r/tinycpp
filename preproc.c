@@ -1204,6 +1204,7 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 			}
 			if(skip_conditional_block) switch(index) {
 				case 0: case 1: case 2: case 3: case 4:
+				case 11: case 12:
 					continue;
 				default: break;
 			}
