@@ -6,6 +6,8 @@
 #include "tglist.h"
 #include "hbmap.h"
 
+#define DIRECTIVESYMBOL '#'
+
 #define MACRO_FLAG_OBJECTLIKE (1U<<31)
 #define MACRO_FLAG_VARIADIC (1U<<30)
 #define MACRO_ARGCOUNT_MASK (~(0|MACRO_FLAG_OBJECTLIKE|MACRO_FLAG_VARIADIC))
@@ -16,6 +18,8 @@
 #define MACRO_VARIADIC(M) (M->num_args & MACRO_FLAG_VARIADIC)
 
 #define MAX_RECURSION 32
+
+#define STR(S) #S
 
 static unsigned string_hash(const char* s) {
 	uint_fast32_t h = 0;
@@ -748,12 +752,12 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 			} else {
 				if(hash_count == 1) {
 		hash_err:
-					error("'#' is not followed by macro parameter", &t2, &tok);
+					error(STR(DIRECTIVESYMBOL) " is not followed by macro parameter", &t2, &tok);
 					return 0;
 				}
 				emit_token(output, &tok, t2.buf);
 			}
-		} else if(is_char(&tok, '#')) {
+		} else if(is_char(&tok, DIRECTIVESYMBOL)) {
 			if(hash_count) {
 				goto hash_err;
 			}
@@ -763,12 +767,12 @@ static int expand_macro(struct cpp* cpp, struct tokenizer *t, FILE* out, const c
 				while(tokenizer_peek(&t2) == '\n') {
 					x_tokenizer_next(&t2, &tok);
 				}
-				if(tokenizer_peek(&t2) == '#') x_tokenizer_next(&t2, &tok);
+				if(tokenizer_peek(&t2) == DIRECTIVESYMBOL) x_tokenizer_next(&t2, &tok);
 				else break;
 			}
 			if(hash_count == 1) flush_whitespace(output, &ws_count);
 			else if(hash_count > 2) {
-				error("only two '#' characters allowed for macro expansion", &t2, &tok);
+				error("only two " STR(DIRECTIVESYMBOL) " characters allowed for macro expansion", &t2, &tok);
 				return 0;
 			}
 			if(hash_count == 2)
@@ -1190,10 +1194,10 @@ int parse_file(struct cpp *cpp, FILE *f, const char *fn, FILE *out) {
 			if(!ret) return ret;
 		}
 		if(curr.type == TT_EOF) break;
-		if(skip_conditional_block && !(newline && is_char(&curr, '#'))) continue;
-		if(is_char(&curr, '#')) {
+		if(skip_conditional_block && !(newline && is_char(&curr, DIRECTIVESYMBOL))) continue;
+		if(is_char(&curr, DIRECTIVESYMBOL)) {
 			if(!newline) {
-				error("stray #", &t, &curr);
+				error("stray " STR(DIRECTIVESYMBOL), &t, &curr);
 				return 0;
 			}
 			int index = expect(&t, TT_IDENTIFIER, directives, &curr);
