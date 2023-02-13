@@ -14,18 +14,30 @@ static int usage(char *a0) {
 int main(int argc, char** argv) {
 	int c; char* tmp;
 	struct cpp* cpp = cpp_new();
-	while ((c = getopt(argc, argv, "D:I:")) != EOF) switch(c) {
-	case 'I': cpp_add_includedir(cpp, optarg); break;
-	case 'D':
-		if((tmp = strchr(optarg, '='))) *tmp = ' ';
-		cpp_add_define(cpp, optarg);
-		break;
-	default: return usage(argv[0]);
-	}
 	char *fn = "stdin";
+	char *fnarg = NULL;
+	int fnargc = 0;
 	FILE *in = stdin;
-	if(argv[optind] && strcmp(argv[optind], "-")) {
-		fn = argv[optind];
+	while (optind < argc) {
+		if ((c = getopt(argc, argv, "D:I:")) != EOF) switch(c) {
+		case 'I': cpp_add_includedir(cpp, optarg); break;
+		case 'D':
+			if((tmp = strchr(optarg, '='))) *tmp = ' ';
+			cpp_add_define(cpp, optarg);
+			break;
+		default: return usage(argv[0]);
+		}
+		else {
+			if (fnargc) return usage(argv[0]);
+			if (strcmp(argv[optind], "-")) {
+				fnarg = argv[optind];
+			}
+			fnargc++;
+			optind++;
+		}
+	}
+	if (fnarg) {
+		fn = fnarg;
 		in = fopen(fn, "r");
 		if(!in) {
 			perror("fopen");
