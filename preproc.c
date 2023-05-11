@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <string.h>
 #include <ctype.h>
 #include <assert.h>
@@ -263,7 +264,29 @@ static int emit_error_or_warning(struct tokenizer *t, int is_error) {
 static FILE *freopen_r(FILE *f, char **buf, size_t *size) {
 	fflush(f);
 	fclose(f);
-	return fmemopen(*buf, *size, "r");
+	f = fmemopen(*buf, *size, "r");
+	// As of POSIX 1003.1-2017, fmemopen() may fail with EINVAL when size = 0
+	if ( ! f && errno == EINVAL && *size == 0 ) {
+		// in this case, attempt to allocate a buffer of size 1, and try again
+		void * newbuf = realloc(*buf, 1);
+		if ( newbuf ) {
+			// update output buf pointer; keep size as 0
+			*buf = newbuf;
+			// use w+ to truncate the buffer to length 0
+			f = fmemopen(newbuf, 1, "w+");
+			if ( ! f )
+#if DEBUG
+				perror("fmemopen");
+#endif
+		}
+#if DEBUG
+		else
+			perror("realloc");
+	} else if ( ! f ) {
+		perror("fmemopen");
+#endif
+	}
+	return f;
 }
 
 static int consume_nl_and_ws(struct tokenizer *t, struct token *tok, int expected) {
