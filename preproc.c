@@ -215,6 +215,7 @@ static int include_file(struct cpp* cpp, struct tokenizer *t, FILE* out) {
 	struct token tok;
 	tokenizer_set_flags(t, 0); // disable string tokenization
 
+	char * dirname = NULL;
 	int inc1sep = expect(t, TT_SEP, inc_chars, &tok);
 	if(inc1sep == -1) {
 		error("expected one of [\"<]", t, &tok);
@@ -225,21 +226,36 @@ static int include_file(struct cpp* cpp, struct tokenizer *t, FILE* out) {
 		error("error parsing filename", t, &tok);
 		return 0;
 	}
-	// TODO: different path lookup depending on whether " or <
+	// add current directory to head of search path for #include ""
+	if ( inc_chars[inc1sep][0] == '"' ) {
+		if ((dirname = strdup(t->filename)))
+			*(strrchr(dirname, '/') ?: dirname) = 0; // terminate string after last directory component (if any)
+		else
+			return (void)perror("strdup"), 0;
+		if (dirname[0])
+			tglist_insert(&cpp->includedirs, dirname, 0);
+	}
+	const char *fn = t->buf;
 	size_t i;
 	FILE *f = 0;
 	tglist_foreach(&cpp->includedirs, i) {
 		char buf[512];
-		snprintf(buf, sizeof buf, "%s/%s", tglist_get(&cpp->includedirs, i), t->buf);
+		snprintf(buf, sizeof buf, "%s/%s", tglist_get(&cpp->includedirs, i), fn);
+#if DEBUG
+		dprintf(2, "searching for #include %s%s%s: %s\n", inc_chars[inc1sep], fn, inc_chars_end[inc1sep], buf);
+#endif
 		f = fopen(buf, "r");
 		if(f) break;
 	}
+	if (dirname && dirname[0])
+		tglist_delete(&cpp->includedirs, 0); // remove dirname from head of list
+	free(dirname);
+	dirname = NULL;
 	if(!f) {
-		dprintf(2, "%s: ", t->buf);
+		dprintf(2, "%s: ", fn);
 		perror("fopen");
 		return 0;
 	}
-	const char *fn = strdup(t->buf);
 	assert(tokenizer_next(t, &tok) && is_char(&tok, inc_chars_end[inc1sep][0]));
 
 	tokenizer_set_flags(t, TF_PARSE_STRINGS);
