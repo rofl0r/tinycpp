@@ -215,7 +215,7 @@ static int include_file(struct cpp* cpp, struct tokenizer *t, FILE* out) {
 	struct token tok;
 	tokenizer_set_flags(t, 0); // disable string tokenization
 
-    char * dirname = NULL;
+	char * dirname = NULL;
 	int inc1sep = expect(t, TT_SEP, inc_chars, &tok);
 	if(inc1sep == -1) {
 		error("expected one of [\"<]", t, &tok);
